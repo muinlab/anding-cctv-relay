@@ -6,10 +6,14 @@ Wants=anding-cctv.service
 
 [Service]
 Type=simple
+
+# Tailscale 인증 상태 확인 후 실행
+ExecStartPre=/bin/sh -c 'tailscale status --json 2>/dev/null | grep -q "BackendState.*Running" || (echo "Tailscale not authenticated. Run: sudo tailscale up" && exit 1)'
+
 ExecStart=/usr/bin/tailscale funnel --bg 1984
 ExecStop=/usr/bin/tailscale funnel off 1984
 Restart=on-failure
-RestartSec=10
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
