@@ -107,6 +107,7 @@ sudo systemctl start anding-cctv
 - [문제 해결](docs/08-troubleshooting.md)
 - [**Windows WSL2 설치**](docs/09-windows-wsl2-setup.md)
 - [**다중 지점 관리**](docs/10-multi-store.md)
+- [**Supabase 배포 가이드**](docs/11-supabase-deployment.md)
 
 ### cctv-worker 문서
 
@@ -160,12 +161,22 @@ docker compose up -d --build
 
 ## 지점별 배포
 
-| 지점 | 접속 URL | 상태 |
-|-----|---------|------|
-| 오류동역 | Tailscale Funnel URL | 예정 |
-| 강남구청역 | Tailscale Funnel URL | 예정 |
+| 지점 | 접속 URL | Runner | 상태 |
+|-----|---------|--------|------|
+| 오류동역 | https://desktop-v4qfv1i.tail48e9b8.ts.net | oryudong-runner | ✅ 운영중 |
+| 강남구청역 | - | - | 예정 |
 
-> Tailscale Funnel 활성화 후 `tailscale funnel status`로 URL 확인
+### 자동 배포
+
+`deploy` 브랜치에 머지하면 GitHub Actions가 각 지점의 self-hosted runner에서 자동 배포합니다:
+
+```bash
+git checkout deploy
+git merge main
+git push origin deploy
+```
+
+> 신규 지점 추가: [Supabase 배포 가이드](docs/11-supabase-deployment.md) 참조
 
 ## 라이선스
 
