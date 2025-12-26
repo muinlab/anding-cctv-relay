@@ -1,0 +1,41 @@
+name: Deploy to CCTV Relay Servers
+
+on:
+  push:
+    branches:
+      - deploy
+
+jobs:
+  deploy-oryudong:
+    name: Deploy to 오류동역점
+    runs-on: [self-hosted, oryudong]
+    env:
+      STORE_ID: oryudong
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate go2rtc config from Supabase
+        run: ./scripts/generate-go2rtc-config.sh
+
+      - name: Restart services
+        run: |
+          sudo docker compose down
+          sudo docker compose up -d go2rtc
+
+      - name: Health check
+        run: |
+          sleep 5
+          curl -sf http://localhost:1984/api || exit 1
+          echo "go2rtc is healthy"
+
+      - name: Show status
+        run: |
+          echo "=== Container Status ==="
+          sudo docker compose ps
+          echo ""
+          echo "=== Available Streams ==="
+          curl -s http://localhost:1984/api/streams | jq 'keys'
