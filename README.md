@@ -36,7 +36,20 @@
 
 ## 빠른 시작
 
-### Windows (권장)
+### Windows (WSL2 권장)
+
+WSL2를 사용하면 Docker Desktop 없이 리소스 효율적으로 운영할 수 있습니다.
+
+```powershell
+# 1. WSL2 설치
+wsl --install -d Ubuntu-22.04
+
+# 2. 이후 WSL Ubuntu에서 Linux 설치 방법 따라 진행
+```
+
+자세한 가이드: [Windows WSL2 설치 가이드](docs/09-windows-wsl2-setup.md)
+
+### Windows (Docker Desktop)
 
 ```powershell
 # PowerShell에서 한 줄로 설치 (관리자 권한 자동 요청)
@@ -92,6 +105,13 @@ sudo systemctl start anding-cctv
 - [admin-web 연동](docs/06-admin-web.md)
 - [운영 및 모니터링](docs/07-operations.md)
 - [문제 해결](docs/08-troubleshooting.md)
+- [**Windows WSL2 설치**](docs/09-windows-wsl2-setup.md)
+- [**다중 지점 관리**](docs/10-multi-store.md)
+
+### cctv-worker 문서
+
+- [인터페이스 계약 (API/DB 스키마)](cctv-worker/API_CONTRACT.md)
+- [cctv-worker README](cctv-worker/README.md)
 
 ## 디렉토리 구조
 
@@ -101,17 +121,42 @@ anding-cctv-relay/
 ├── .env.example            # 환경변수 템플릿
 ├── go2rtc/
 │   └── go2rtc.yaml         # 스트리밍 서버 설정
+├── cctv-worker/            # YOLO 감지 워커 (소스 포함)
+│   ├── src/                # Python 소스 코드
+│   │   ├── api/            # FastAPI 엔드포인트
+│   │   ├── core/           # YOLO 감지, ROI 매칭
+│   │   ├── workers/        # 메인 감지 워커
+│   │   └── ...
+│   ├── Dockerfile
+│   ├── API_CONTRACT.md     # 인터페이스 계약
+│   └── README.md
 ├── scripts/
-│   ├── bootstrap.ps1       # Windows 부트스트랩 (관리자 자동 요청)
-│   ├── install.ps1         # Windows 설치 스크립트 (PowerShell)
-│   ├── install.sh          # Linux 설치 스크립트 (Bash)
-│   ├── start.bat           # Windows 시작 스크립트 (자동 생성)
-│   └── stop.bat            # Windows 종료 스크립트 (자동 생성)
+│   ├── bootstrap.ps1       # Windows 부트스트랩
+│   ├── install.ps1         # Windows 설치 스크립트
+│   ├── install.sh          # Linux 설치 스크립트
+│   └── ...
 ├── systemd/
 │   ├── anding-cctv.service         # Linux systemd 서비스
 │   └── tailscale-funnel.service    # Tailscale Funnel 서비스
 └── docs/                   # 상세 문서
 ```
+
+## 디버그 스트림
+
+YOLO 감지 결과를 실시간으로 확인할 수 있는 디버그 스트림 기능:
+
+```bash
+# .env에서 활성화
+DEBUG_STREAM_ENABLED=true
+
+# 서비스 재시작
+docker compose up -d --build
+```
+
+브라우저에서 `http://localhost:8001/debug/` 접속:
+- 실시간 MJPEG 스트림 (바운딩 박스 오버레이)
+- ROI 폴리곤 시각화
+- 채널별 스냅샷
 
 ## 지점별 배포
 

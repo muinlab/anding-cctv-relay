@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Logs
+logs/*.log
+*.log
+
+# Data (keep structure)
+data/snapshots/*
+!data/snapshots/.gitkeep
+data/roi_configs/*
+!data/roi_configs/.gitkeep
+
+# Models (large files)
+*.pt
+*.onnx
+*.engine
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
