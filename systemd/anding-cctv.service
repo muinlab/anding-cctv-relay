@@ -8,17 +8,30 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/home/anding/anding-cctv-relay
+
+# 시작 전 이미지 업데이트 (조용히)
 ExecStartPre=/usr/bin/docker compose pull --quiet
-ExecStart=/usr/bin/docker compose up -d
-ExecStop=/usr/bin/docker compose down
-ExecReload=/usr/bin/docker compose restart
+
+# 자동 업데이트(watchtower) 포함해서 시작
+ExecStart=/usr/bin/docker compose --profile auto-update up -d
+
+# Graceful shutdown: 컨테이너 안전하게 종료
+ExecStop=/usr/bin/docker compose --profile auto-update down --timeout 30
+
+# 재시작 (설정 변경 후)
+ExecReload=/usr/bin/docker compose --profile auto-update restart
+
 User=anding
 Group=docker
-TimeoutStartSec=120
-TimeoutStopSec=30
+TimeoutStartSec=180
+TimeoutStopSec=60
 
 # 환경변수 파일 로드
 EnvironmentFile=-/home/anding/anding-cctv-relay/.env
+
+# 재시작 정책
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
