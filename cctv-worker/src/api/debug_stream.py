@@ -5,7 +5,10 @@ bounding boxes overlaid on the video feed for debugging purposes.
 """
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
-from typing import Generator
+from typing import Generator, Optional
+import threading
+import logging
+import numpy as np
 import cv2
 import time
 import os
@@ -20,24 +23,37 @@ from src.utils import RTSPClient
 from src.core import PersonDetector, ROIMatcher
 
 
+# Logger
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/debug", tags=["Debug Stream"])
 
-# Global detector instance (lazy loaded)
-_detector = None
+# Constants
+STREAM_JPEG_QUALITY = 80
+SNAPSHOT_JPEG_QUALITY = 90
+
+# Global detector instance with thread-safe initialization
+_detector: Optional[PersonDetector] = None
+_detector_lock = threading.Lock()
 
 
 def get_detector() -> PersonDetector:
-    """Get or create YOLO detector instance."""
+    """Get or create YOLO detector instance (thread-safe)."""
     global _detector
     if _detector is None:
-        _detector = PersonDetector(
-            model_path=settings.YOLO_MODEL,
-            confidence=settings.CONFIDENCE_THRESHOLD
-        )
+        with _detector_lock:
+            # Double-checked locking
+            if _detector is None:
+                logger.info("Initializing YOLO detector...")
+                _detector = PersonDetector(
+                    model_path=settings.YOLO_MODEL,
+                    confidence=settings.CONFIDENCE_THRESHOLD
+                )
+                logger.info("YOLO detector initialized")
     return _detector
 
 
-def get_roi_matcher(channel_id: int) -> ROIMatcher | None:
+def get_roi_matcher(channel_id: int) -> Optional[ROIMatcher]:
     """Get ROI matcher for channel if config exists."""
     config_path = settings.ROI_CONFIG_DIR / f"channel_{channel_id:02d}.json"
     if config_path.exists():
@@ -55,22 +71,26 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
     Yields:
         MJPEG frame bytes
     """
-    # Build RTSP URL
-    username = settings.RTSP_USERNAME
-    password = settings.RTSP_PASSWORD
-    host = settings.RTSP_HOST
-    port = settings.RTSP_PORT
-    rtsp_url = f"rtsp://{username}:{password}@{host}:{port}/live_{channel_id:02d}"
+    # Build RTSP URL using settings method (secure)
+    rtsp_url = settings.get_rtsp_url(
+        host=settings.RTSP_HOST,
+        port=settings.RTSP_PORT,
+        channel_id=channel_id
+    )
 
     client = RTSPClient(rtsp_url)
     detector = get_detector()
     roi_matcher = get_roi_matcher(channel_id)
 
     frame_interval = 1.0 / fps
+    error_count = 0
+    max_errors = 10
+
+    logger.info(f"Starting MJPEG stream for channel {channel_id} at {fps} FPS")
 
     try:
         if not client.connect(timeout=10):
-            # Yield error frame
+            logger.error(f"Failed to connect to channel {channel_id}")
             error_frame = create_error_frame(f"Failed to connect to channel {channel_id}")
             _, buffer = cv2.imencode('.jpg', error_frame)
             yield (b'--frame\r\n'
@@ -80,45 +100,61 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
         while True:
             start_time = time.time()
 
-            # Capture frame
-            frame = client.capture_frame()
-            if frame is None:
-                # Try to reconnect
-                client.disconnect()
-                if not client.connect(timeout=10):
-                    error_frame = create_error_frame("Connection lost, reconnecting...")
-                    _, buffer = cv2.imencode('.jpg', error_frame)
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                    time.sleep(1)
+            try:
+                # Capture frame
+                frame = client.capture_frame()
+                if frame is None:
+                    error_count += 1
+                    if error_count >= max_errors:
+                        logger.error(f"Max errors reached on channel {channel_id}, stopping stream")
+                        break
+
+                    # Try to reconnect
+                    client.disconnect()
+                    if not client.connect(timeout=10):
+                        error_frame = create_error_frame("Connection lost, reconnecting...")
+                        _, buffer = cv2.imencode('.jpg', error_frame)
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                        time.sleep(1)
+                        continue
                     continue
+
+                # Reset error count on successful frame
+                error_count = 0
+
+                # Detect persons
+                detections = detector.detect_persons(frame)
+
+                # Annotate frame with bounding boxes
+                annotated = detector.annotate_image(frame, detections)
+
+                # Add ROI overlay if config exists
+                if roi_matcher:
+                    occupancy = roi_matcher.check_occupancy(detections, iou_threshold=settings.IOU_THRESHOLD)
+                    annotated = roi_matcher.visualize_rois(annotated, occupancy)
+
+                    # Draw person bottom center points
+                    for x1, y1, x2, y2, conf in detections:
+                        bottom_center = (int((x1 + x2) / 2), int(y2))
+                        cv2.circle(annotated, bottom_center, 8, (255, 0, 255), -1)
+
+                # Add debug info overlay
+                annotated = add_debug_overlay(annotated, channel_id, len(detections), fps)
+
+                # Encode to JPEG
+                _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY])
+
+                # Yield MJPEG frame
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+
+            except cv2.error as e:
+                logger.error(f"OpenCV error on channel {channel_id}: {e}")
+                error_count += 1
+                if error_count >= max_errors:
+                    break
                 continue
-
-            # Detect persons
-            detections = detector.detect_persons(frame)
-
-            # Annotate frame with bounding boxes
-            annotated = detector.annotate_image(frame, detections)
-
-            # Add ROI overlay if config exists
-            if roi_matcher:
-                occupancy = roi_matcher.check_occupancy(detections, iou_threshold=settings.IOU_THRESHOLD)
-                annotated = roi_matcher.visualize_rois(annotated, occupancy)
-
-                # Draw person bottom center points
-                for x1, y1, x2, y2, conf in detections:
-                    bottom_center = (int((x1 + x2) / 2), int(y2))
-                    cv2.circle(annotated, bottom_center, 8, (255, 0, 255), -1)
-
-            # Add debug info overlay
-            annotated = add_debug_overlay(annotated, channel_id, len(detections), fps)
-
-            # Encode to JPEG
-            _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
-
-            # Yield MJPEG frame
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
             # Control frame rate
             elapsed = time.time() - start_time
@@ -126,15 +162,24 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
                 time.sleep(frame_interval - elapsed)
 
     except GeneratorExit:
-        pass
+        logger.info(f"Stream closed for channel {channel_id}")
+    except Exception as e:
+        logger.error(f"Unexpected error on channel {channel_id}: {e}")
+        # Yield error frame before exiting
+        try:
+            error_frame = create_error_frame(f"Error: {str(e)[:30]}")
+            _, buffer = cv2.imencode('.jpg', error_frame)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        except Exception:
+            pass
     finally:
         client.disconnect()
+        logger.info(f"Disconnected from channel {channel_id}")
 
 
-def create_error_frame(message: str, width: int = 640, height: int = 480) -> any:
+def create_error_frame(message: str, width: int = 640, height: int = 480) -> np.ndarray:
     """Create an error message frame."""
-    import numpy as np
-
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:] = (40, 40, 40)  # Dark gray background
 
@@ -153,7 +198,7 @@ def create_error_frame(message: str, width: int = 640, height: int = 480) -> any
     return frame
 
 
-def add_debug_overlay(frame, channel_id: int, person_count: int, fps: int) -> any:
+def add_debug_overlay(frame: np.ndarray, channel_id: int, person_count: int, fps: int) -> np.ndarray:
     """Add debug information overlay to frame."""
     # Add semi-transparent background for text
     overlay = frame.copy()
@@ -185,7 +230,7 @@ def add_debug_overlay(frame, channel_id: int, person_count: int, fps: int) -> an
 @router.get("/", response_class=HTMLResponse)
 async def debug_index():
     """Debug stream index page with channel selection."""
-    active_channels = settings.ACTIVE_CHANNELS
+    active_channels = getattr(settings, 'ACTIVE_CHANNELS', [1, 2, 3, 4])
 
     channel_links = "\n".join([
         f'<a href="/debug/stream/{ch}" target="_blank" class="channel-link">'
@@ -306,12 +351,12 @@ async def snapshot_channel(channel_id: int):
     if not 1 <= channel_id <= 16:
         raise HTTPException(status_code=400, detail="Channel ID must be between 1 and 16")
 
-    # Build RTSP URL
-    username = settings.RTSP_USERNAME
-    password = settings.RTSP_PASSWORD
-    host = settings.RTSP_HOST
-    port = settings.RTSP_PORT
-    rtsp_url = f"rtsp://{username}:{password}@{host}:{port}/live_{channel_id:02d}"
+    # Build RTSP URL using settings method (secure)
+    rtsp_url = settings.get_rtsp_url(
+        host=settings.RTSP_HOST,
+        port=settings.RTSP_PORT,
+        channel_id=channel_id
+    )
 
     client = RTSPClient(rtsp_url)
     detector = get_detector()
@@ -339,7 +384,7 @@ async def snapshot_channel(channel_id: int):
 
         annotated = add_debug_overlay(annotated, channel_id, len(detections), 0)
 
-        _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, SNAPSHOT_JPEG_QUALITY])
 
         return StreamingResponse(
             iter([buffer.tobytes()]),
@@ -356,7 +401,7 @@ async def stream_status():
     return {
         "enabled": os.getenv("DEBUG_STREAM_ENABLED", "false").lower() == "true",
         "store_id": settings.STORE_ID,
-        "active_channels": settings.ACTIVE_CHANNELS,
+        "active_channels": getattr(settings, 'ACTIVE_CHANNELS', [1, 2, 3, 4]),
         "yolo_model": settings.YOLO_MODEL,
         "confidence_threshold": settings.CONFIDENCE_THRESHOLD,
         "iou_threshold": settings.IOU_THRESHOLD
