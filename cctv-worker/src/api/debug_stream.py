@@ -118,6 +118,9 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
                                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
                         time.sleep(1)
                         continue
+                    # Reset error count on successful reconnection
+                    error_count = 0
+                    logger.info(f"Reconnected to channel {channel_id}")
                     continue
 
                 # Reset error count on successful frame
@@ -164,15 +167,15 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
     except GeneratorExit:
         logger.info(f"Stream closed for channel {channel_id}")
     except Exception as e:
-        logger.error(f"Unexpected error on channel {channel_id}: {e}")
+        logger.error(f"Unexpected error on channel {channel_id}: {e}", exc_info=True)
         # Yield error frame before exiting
         try:
             error_frame = create_error_frame(f"Error: {str(e)[:30]}")
             _, buffer = cv2.imencode('.jpg', error_frame)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        except Exception:
-            pass
+        except Exception as encode_error:
+            logger.error(f"Failed to create error frame for channel {channel_id}: {encode_error}")
     finally:
         client.disconnect()
         logger.info(f"Disconnected from channel {channel_id}")

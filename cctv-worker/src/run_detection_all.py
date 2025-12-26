@@ -12,13 +12,12 @@ from src.core import PersonDetector, ROIMatcher
 
 
 def get_rtsp_url_for_channel(channel_id: int) -> str:
-    """Get RTSP URL for specific channel."""
-    username = settings.RTSP_USERNAME
-    password = settings.RTSP_PASSWORD
-    host = settings.RTSP_HOST
-    port = settings.RTSP_PORT
-    path = f"live_{channel_id:02d}"
-    return f"rtsp://{username}:{password}@{host}:{port}/{path}"
+    """Get RTSP URL for specific channel using settings method."""
+    return settings.get_rtsp_url(
+        host=settings.RTSP_HOST,
+        port=settings.RTSP_PORT,
+        channel_id=channel_id
+    )
 
 
 def get_config_path_for_channel(channel_id: int) -> Path:

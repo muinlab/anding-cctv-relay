@@ -14,12 +14,17 @@ class SupabaseClient:
     def __init__(self):
         """Initialize Supabase client."""
         url = os.getenv("SUPABASE_URL")
-        # Try service key first, fall back to anon key
-        key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+        # Try service role key first, then service key, then anon key
+        key = (
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or
+            os.getenv("SUPABASE_SERVICE_KEY") or
+            os.getenv("SUPABASE_KEY")
+        )
 
         if not url or not key:
             raise ValueError(
-                "SUPABASE_URL and SUPABASE_KEY (or SUPABASE_SERVICE_KEY) must be set in .env"
+                "SUPABASE_URL and one of SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SERVICE_KEY, "
+                "or SUPABASE_KEY must be set in environment"
             )
 
         self.client: Client = create_client(url, key)

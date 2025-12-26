@@ -417,8 +417,9 @@ class ChannelWorker:
 
             # Flush pending detection logs
             if self.detection_logger:
-                self.detection_logger.close()
+                # Get stats before closing to ensure data integrity
                 stats = self.detection_logger.get_stats()
+                self.detection_logger.close()
                 if self.logger:
                     self.logger.info(
                         "Detection logger stats",
@@ -479,14 +480,10 @@ class MultiChannelWorker:
             raise ValueError(f"Store {store_id} not found")
 
     def get_rtsp_url(self, channel_id: int) -> str:
-        """Generate RTSP URL for channel."""
-        username = settings.RTSP_USERNAME
-        password = settings.RTSP_PASSWORD
+        """Generate RTSP URL for channel using settings method."""
         host = self.store.get('rtsp_host') or settings.RTSP_HOST
         port = self.store.get('rtsp_port') or settings.RTSP_PORT
-        path = f"live_{channel_id:02d}"
-
-        return f"rtsp://{username}:{password}@{host}:{port}/{path}"
+        return settings.get_rtsp_url(host=host, port=port, channel_id=channel_id)
 
     def start(self):
         """Start all channel workers."""

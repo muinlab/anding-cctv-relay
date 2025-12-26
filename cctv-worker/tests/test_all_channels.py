@@ -10,14 +10,12 @@ from src.utils import RTSPClient
 
 
 def get_rtsp_url_for_channel(channel_id: int) -> str:
-    """Get RTSP URL for specific channel (1-16)."""
-    username = settings.RTSP_USERNAME
-    password = settings.RTSP_PASSWORD
-    host = settings.RTSP_HOST
-    port = settings.RTSP_PORT
-    path = f"live_{channel_id:02d}"
-
-    return f"rtsp://{username}:{password}@{host}:{port}/{path}"
+    """Get RTSP URL for specific channel (1-16) using settings method."""
+    return settings.get_rtsp_url(
+        host=settings.RTSP_HOST,
+        port=settings.RTSP_PORT,
+        channel_id=channel_id
+    )
 
 
 def test_all_channels():
