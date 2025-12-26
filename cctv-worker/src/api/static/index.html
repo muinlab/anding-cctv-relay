@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV ROI Configuration Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
+        .content {
+            display: flex;
+            height: calc(100vh - 140px);
+        }
+
+        .sidebar {
+            width: 280px;
+            background: #fafafa;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .channel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .channel-item {
+            padding: 12px 16px;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .channel-item:hover {
+            border-color: #667eea;
+            transform: translateX(2px);
+        }
+
+        .channel-item.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .channel-name {
+            font-weight: 500;
+        }
+
+        .config-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #4caf50;
+            color: white;
+        }
+
+        .channel-item.active .config-badge {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .no-config {
+            background: #bdbdbd;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #9e9e9e;
+            color: white;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvas {
+            max-width: 100%;
+            max-height: 100%;
+            cursor: crosshair;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 30px 50px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .seat-list {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fafafa;
+            border-radius: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .seat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: white;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .seat-info {
+            flex: 1;
+        }
+
+        .seat-id {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .seat-coords {
+            font-size: 12px;
+            color: #757575;
+            margin-top: 2px;
+        }
+
+        .btn-delete {
+            padding: 4px 12px;
+            font-size: 12px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .status-bar {
+            padding: 10px 15px;
+            background: #f5f5f5;
+            border-top: 1px solid #e0e0e0;
+            font-size: 13px;
+            color: #616161;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .spacer {
+            flex: 1;
+        }
+
+        .empty-state {
+            color: white;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>CCTV ROI Configuration Tool</h1>
+            <div class="subtitle">16-Channel Polygon Seat Detection Setup</div>
+        </header>
+
+        <div class="content">
+            <div class="sidebar">
+                <h3 style="margin-bottom: 15px; font-size: 16px;">Channels</h3>
+                <div class="channel-list" id="channelList">
+                    <!-- Channels will be loaded here -->
+                </div>
+            </div>
+
+            <div class="main-content">
+                <div class="toolbar">
+                    <button class="btn-primary" onclick="loadSnapshot()">📷 Load Snapshot</button>
+                    <button class="btn-primary" onclick="autoDetectSeats()" style="background: #9c27b0;">🤖 Auto Detect</button>
+                    <button class="btn-primary" onclick="runDetection()" style="background: #ff9800;">🎯 Run Detection</button>
+                    <button class="btn-primary" onclick="startDrawing()">✏️ Draw Polygon</button>
+                    <button class="btn-success" onclick="finishPolygon()" id="finishBtn" style="display: none;">✓ Finish Polygon</button>
+                    <button class="btn-secondary" onclick="clearCurrentPolygon()">↩️ Clear Current</button>
+
+                    <div class="input-group">
+                        <label>Seat ID:</label>
+                        <input type="text" id="seatId" placeholder="e.g., 1" style="width: 80px;">
+                        <label>Label:</label>
+                        <input type="text" id="seatLabel" placeholder="e.g., Seat 1" style="width: 120px;">
+                    </div>
+
+                    <div class="spacer"></div>
+
+                    <button class="btn-success" onclick="saveConfig()">💾 Save Config</button>
+                    <button class="btn-danger" onclick="clearAllSeats()">🗑️ Clear All</button>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="canvas"></canvas>
+                    <div class="loading" id="loading">Select a channel to start</div>
+                </div>
+
+                <div class="seat-list" id="seatList" style="display: none;">
+                    <h4 style="margin-bottom: 10px;">Configured Seats</h4>
+                    <div id="seatItems"></div>
+                </div>
+
+                <div class="status-bar" id="statusBar">
+                    Ready
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentChannel = null;
+        let seats = [];
+        let currentPolygon = [];
+        let isDrawing = false;
+        let backgroundImage = null;
+        let canvas, ctx;
+        let detectedPolygons = [];  // Store auto-detected polygons
+        let selectedPolygonIndex = -1;  // Currently selected polygon for ID assignment
+
+        // Initialize
+        window.onload = function() {
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            loadChannels();
+
+            canvas.addEventListener('click', handleCanvasClick);
+            canvas.addEventListener('mousemove', handleCanvasMove);
+            document.addEventListener('keydown', handleKeyPress);
+        };
+
+        // Load channel list
+        async function loadChannels() {
+            try {
+                const response = await fetch('/api/channels');
+                const channels = await response.json();
+
+                const channelList = document.getElementById('channelList');
+                channelList.innerHTML = '';
+
+                channels.forEach(ch => {
+                    const div = document.createElement('div');
+                    div.className = 'channel-item';
+                    div.onclick = () => selectChannel(ch.channel_id);
+
+                    div.innerHTML = `
+                        <span class="channel-name">Channel ${ch.channel_id}</span>
+                        <span class="config-badge ${ch.config_exists ? '' : 'no-config'}">
+                            ${ch.config_exists ? '✓' : '○'}
+                        </span>
+                    `;
+
+                    channelList.appendChild(div);
+                });
+            } catch (error) {
+                console.error('Failed to load channels:', error);
+                updateStatus('Failed to load channels', 'error');
+            }
+        }
+
+        // Select channel
+        async function selectChannel(channelId) {
+            currentChannel = channelId;
+
+            // Update UI
+            document.querySelectorAll('.channel-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.channel-item').classList.add('active');
+
+            // Clear canvas
+            seats = [];
+            currentPolygon = [];
+            isDrawing = false;
+            backgroundImage = null;
+            redraw();
+
+            // Load config
+            await loadConfig();
+
+            // Auto-load snapshot
+            await loadSnapshot();
+
+            // Update status
+            updateStatus(`Channel ${channelId} loaded`);
+        }
+
+        // Load snapshot
+        async function loadSnapshot() {
+            if (!currentChannel) {
+                alert('Please select a channel first');
+                return;
+            }
+
+            const loadingEl = document.getElementById('loading');
+            loadingEl.innerHTML = '<div class="loading-spinner"></div>Connecting to RTSP...<br><small style="font-size: 14px; opacity: 0.8;">This may take 5-15 seconds</small>';
+            loadingEl.style.display = 'block';
+            updateStatus('Connecting to RTSP stream...');
+
+            try {
+                const response = await fetch(`/api/channels/${currentChannel}/snapshot`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+
+                const img = new Image();
+                img.onload = function() {
+                    backgroundImage = img;
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    redraw();
+                    loadingEl.style.display = 'none';
+                    updateStatus('Snapshot loaded successfully!');
+                };
+                img.onerror = function() {
+                    loadingEl.style.display = 'none';
+                    updateStatus('Failed to display image', 'error');
+                };
+                img.src = url;
+            } catch (error) {
+                console.error('Failed to load snapshot:', error);
+                loadingEl.style.display = 'none';
+                updateStatus(`Failed: ${error.message}`, 'error');
+                alert(`Failed to load snapshot from Channel ${currentChannel}.\n\nError: ${error.message}\n\nThis channel may not exist or is not accessible.`);
+            }
+        }
+
+        // Auto-detect seats
+        async function autoDetectSeats() {
+            if (!currentChannel) {
+                alert('Please select a channel first');
+                return;
+            }
+
+            if (!backgroundImage) {
+                alert('Please load a snapshot first');
+                return;
+            }
+
+            const loadingEl = document.getElementById('loading');
+            loadingEl.innerHTML = '<div class="loading-spinner"></div>Auto-detecting seats...<br><small style="font-size: 14px; opacity: 0.8;">This may take 5-10 seconds</small>';
+            loadingEl.style.display = 'block';
+            updateStatus('Auto-detecting seats...');
+
+            try {
+                const response = await fetch(`/api/channels/${currentChannel}/auto-detect?min_area=10000&max_area=150000`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                loadingEl.style.display = 'none';
+
+                if (result.detected === 0) {
+                    alert('No seats detected. Try adjusting the camera angle or drawing manually.');
+                    updateStatus('No seats detected', 'error');
+                    return;
+                }
+
+                // Store detected polygons
+                detectedPolygons = result.polygons;
+
+                // Add all detected polygons as temporary seats
+                seats = [];
+                detectedPolygons.forEach((poly, index) => {
+                    seats.push({
+                        id: `auto_${index + 1}`,
+                        roi: poly.roi,
+                        type: 'polygon',
+                        label: `Auto ${index + 1} (Click to assign ID)`
+                    });
+                });
+
+                redraw();
+                updateSeatList();
+                updateStatus(`Detected ${result.detected} seat(s). Click on seats to assign IDs.`);
+
+                alert(`Auto-detected ${result.detected} seat region(s)!\n\nClick on each seat in the list below to assign a Seat ID and Label.`);
+
+            } catch (error) {
+                console.error('Failed to auto-detect:', error);
+                loadingEl.style.display = 'none';
+                updateStatus(`Auto-detect failed: ${error.message}`, 'error');
+                alert(`Failed to auto-detect seats.\n\nError: ${error.message}`);
+            }
+        }
+
+        // Assign ID to auto-detected seat
+        function assignIdToSeat(index) {
+            const seat = seats[index];
+
+            // Prompt for seat ID and label
+            const seatId = prompt(`Assign Seat ID for "${seat.label}":`, '');
+            if (!seatId) return;
+
+            const seatLabel = prompt(`Assign Label for Seat ${seatId}:`, `Seat ${seatId}`);
+
+            // Update seat
+            seats[index] = {
+                id: seatId,
+                roi: seat.roi,
+                type: 'polygon',
+                label: seatLabel || `Seat ${seatId}`
+            };
+
+            redraw();
+            updateSeatList();
+            updateStatus(`Assigned ID "${seatId}" to seat ${index + 1}`);
+        }
+
+        // Run detection with current config
+        async function runDetection() {
+            if (!currentChannel) {
+                alert('Please select a channel first');
+                return;
+            }
+
+            if (seats.length === 0) {
+                alert('No seats configured. Please draw some polygons first.');
+                return;
+            }
+
+            // Save config first
+            const config = {
+                camera_id: `branch01_cam${currentChannel}`,
+                resolution: [1920, 1080],
+                seats: seats
+            };
+
+            const loadingEl = document.getElementById('loading');
+            loadingEl.innerHTML = '<div class="loading-spinner"></div>Running Detection...<br><small style="font-size: 14px; opacity: 0.8;">This may take 10-20 seconds</small>';
+            loadingEl.style.display = 'block';
+            updateStatus('Running person detection...');
+
+            try {
+                // Save config first
+                await fetch(`/api/channels/${currentChannel}/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                // Run detection
+                const response = await fetch(`/api/channels/${currentChannel}/detect`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+
+                const img = new Image();
+                img.onload = function() {
+                    backgroundImage = img;
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    loadingEl.style.display = 'none';
+                    updateStatus('Detection completed! Green=Empty, Red=Occupied');
+                };
+                img.onerror = function() {
+                    loadingEl.style.display = 'none';
+                    updateStatus('Failed to display detection result', 'error');
+                };
+                img.src = url;
+            } catch (error) {
+                console.error('Failed to run detection:', error);
+                loadingEl.style.display = 'none';
+                updateStatus(`Detection failed: ${error.message}`, 'error');
+                alert(`Failed to run detection.\n\nError: ${error.message}`);
+            }
+        }
+
+        // Load config
+        async function loadConfig() {
+            if (!currentChannel) return;
+
+            try {
+                const response = await fetch(`/api/channels/${currentChannel}/config`);
+                const config = await response.json();
+                seats = config.seats || [];
+                redraw();
+                updateSeatList();
+                updateStatus(`Loaded ${seats.length} seat(s)`);
+            } catch (error) {
+                console.error('Failed to load config:', error);
+                updateStatus('Failed to load config', 'error');
+            }
+        }
+
+        // Save config
+        async function saveConfig() {
+            if (!currentChannel) {
+                alert('Please select a channel first');
+                return;
+            }
+
+            if (seats.length === 0) {
+                alert('No seats configured');
+                return;
+            }
+
+            const config = {
+                camera_id: `branch01_cam${currentChannel}`,
+                resolution: [1920, 1080],
+                seats: seats
+            };
+
+            try {
+                const response = await fetch(`/api/channels/${currentChannel}/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                const result = await response.json();
+                updateStatus('Config saved successfully!');
+                loadChannels(); // Refresh channel list to update badges
+            } catch (error) {
+                console.error('Failed to save config:', error);
+                updateStatus('Failed to save config', 'error');
+            }
+        }
+
+        // Start drawing polygon
+        function startDrawing() {
+            if (!backgroundImage) {
+                alert('Please load a snapshot first');
+                return;
+            }
+
+            isDrawing = true;
+            currentPolygon = [];
+            document.getElementById('finishBtn').style.display = 'inline-block';
+            updateStatus('Click to add points | Enter/Right-click: Finish | Backspace: Undo last | Esc: Cancel');
+        }
+
+        // Finish polygon
+        function finishPolygon() {
+            if (!isDrawing || currentPolygon.length < 3) {
+                alert('Need at least 3 points to create a polygon');
+                return;
+            }
+
+            const seatId = document.getElementById('seatId').value.trim();
+            const seatLabel = document.getElementById('seatLabel').value.trim();
+
+            if (!seatId) {
+                alert('Please enter a Seat ID');
+                return;
+            }
+
+            // Add seat
+            seats.push({
+                id: seatId,
+                roi: currentPolygon,
+                type: 'polygon',
+                label: seatLabel || `Seat ${seatId}`
+            });
+
+            // Reset
+            currentPolygon = [];
+            isDrawing = false;
+            document.getElementById('seatId').value = '';
+            document.getElementById('seatLabel').value = '';
+            document.getElementById('finishBtn').style.display = 'none';
+
+            redraw();
+            updateSeatList();
+            updateStatus(`Seat ${seatId} added`);
+        }
+
+        // Handle canvas click
+        function handleCanvasClick(e) {
+            if (!isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+            const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+
+            currentPolygon.push([x, y]);
+            redraw();
+        }
+
+        // Handle canvas mouse move
+        function handleCanvasMove(e) {
+            if (!isDrawing || currentPolygon.length === 0) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+            const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+
+            redraw();
+
+            // Draw preview line
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(currentPolygon[currentPolygon.length - 1][0], currentPolygon[currentPolygon.length - 1][1]);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Handle right-click to finish polygon (alternative to Finish button)
+        canvas.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+
+            if (isDrawing && currentPolygon.length >= 3) {
+                finishPolygon();
+            }
+        });
+
+        // Handle keyboard shortcuts
+        function handleKeyPress(e) {
+            if (!isDrawing) return;
+
+            // Don't trigger shortcuts if user is typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            switch(e.key) {
+                case 'Enter':
+                    // Finish polygon with Enter
+                    if (currentPolygon.length >= 3) {
+                        finishPolygon();
+                    } else {
+                        alert('Need at least 3 points to create a polygon');
+                    }
+                    break;
+
+                case 'Backspace':
+                case 'Delete':
+                    // Remove last point with Backspace/Delete
+                    e.preventDefault(); // Prevent browser back navigation
+                    if (currentPolygon.length > 0) {
+                        currentPolygon.pop();
+                        redraw();
+                        updateStatus(`Point removed. ${currentPolygon.length} points remaining.`);
+                    }
+                    break;
+
+                case 'Escape':
+                    // Cancel drawing with Escape
+                    clearCurrentPolygon();
+                    updateStatus('Drawing cancelled');
+                    break;
+            }
+        }
+
+        // Clear current polygon
+        function clearCurrentPolygon() {
+            currentPolygon = [];
+            isDrawing = false;
+            document.getElementById('finishBtn').style.display = 'none';
+            redraw();
+            updateStatus('Current polygon cleared');
+        }
+
+        // Clear all seats
+        function clearAllSeats() {
+            if (!confirm('Are you sure you want to clear all seats?')) return;
+
+            seats = [];
+            currentPolygon = [];
+            isDrawing = false;
+            redraw();
+            updateSeatList();
+            updateStatus('All seats cleared');
+        }
+
+        // Delete seat
+        function deleteSeat(index) {
+            seats.splice(index, 1);
+            redraw();
+            updateSeatList();
+            updateStatus('Seat deleted');
+        }
+
+        // Redraw canvas
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw background image
+            if (backgroundImage) {
+                ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+            }
+
+            // Draw saved polygons
+            seats.forEach((seat, index) => {
+                drawPolygon(seat.roi, '#00ff00', seat.label);
+            });
+
+            // Draw current polygon being drawn
+            if (currentPolygon.length > 0) {
+                drawPolygon(currentPolygon, '#ffff00', 'Drawing...', true);
+            }
+        }
+
+        // Draw polygon
+        function drawPolygon(points, color, label, isIncomplete = false) {
+            if (points.length === 0) return;
+
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 2;
+
+            // Draw lines
+            ctx.beginPath();
+            ctx.moveTo(points[0][0], points[0][1]);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
+            }
+            if (!isIncomplete) {
+                ctx.closePath();
+            }
+            ctx.stroke();
+
+            // Draw vertices
+            points.forEach(point => {
+                ctx.beginPath();
+                ctx.arc(point[0], point[1], 5, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // Draw label
+            if (label && points.length > 0) {
+                ctx.fillStyle = color;
+                ctx.font = '14px Arial';
+                ctx.fillText(label, points[0][0] + 10, points[0][1] - 10);
+            }
+        }
+
+        // Edit seat (load it back into drawing mode)
+        function editSeat(index) {
+            const seat = seats[index];
+
+            // Load seat data into form
+            document.getElementById('seatId').value = seat.id;
+            document.getElementById('seatLabel').value = seat.label;
+
+            // Load polygon points
+            currentPolygon = JSON.parse(JSON.stringify(seat.roi)); // Deep copy
+
+            // Remove seat from list (will be re-added when finished)
+            seats.splice(index, 1);
+
+            // Enter drawing mode
+            isDrawing = true;
+            document.getElementById('finishBtn').style.display = 'inline-block';
+
+            redraw();
+            updateSeatList();
+            updateStatus(`Editing ${seat.label}. Modify points and click Finish when done.`);
+        }
+
+        // Update seat list
+        function updateSeatList() {
+            const seatList = document.getElementById('seatList');
+            const seatItems = document.getElementById('seatItems');
+
+            if (seats.length === 0) {
+                seatList.style.display = 'none';
+                return;
+            }
+
+            seatList.style.display = 'block';
+            seatItems.innerHTML = '';
+
+            seats.forEach((seat, index) => {
+                const div = document.createElement('div');
+                div.className = 'seat-item';
+
+                const pointsStr = seat.roi.map(p => `(${p[0]},${p[1]})`).slice(0, 2).join(' ') + '...';
+
+                // Check if this is an auto-detected seat (needs ID assignment)
+                const isAutoDetected = seat.id.startsWith('auto_');
+                const buttons = isAutoDetected
+                    ? `<button class="btn-delete" onclick="assignIdToSeat(${index})" style="background: #9c27b0; margin-right: 5px;">Assign ID</button>
+                       <button class="btn-delete" onclick="deleteSeat(${index})">Delete</button>`
+                    : `<button class="btn-delete" onclick="editSeat(${index})" style="background: #2196f3; margin-right: 5px;">Edit</button>
+                       <button class="btn-delete" onclick="deleteSeat(${index})">Delete</button>`;
+
+                div.innerHTML = `
+                    <div class="seat-info">
+                        <div class="seat-id">${seat.label}</div>
+                        <div class="seat-coords">${seat.roi.length} points: ${pointsStr}</div>
+                    </div>
+                    ${buttons}
+                `;
+
+                seatItems.appendChild(div);
+            });
+        }
+
+        // Update status bar
+        function updateStatus(message, type = 'info') {
+            const statusBar = document.getElementById('statusBar');
+            statusBar.textContent = message;
+
+            if (type === 'error') {
+                statusBar.style.color = '#f44336';
+            } else {
+                statusBar.style.color = '#616161';
+            }
+
+            setTimeout(() => {
+                statusBar.style.color = '#616161';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

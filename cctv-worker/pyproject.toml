@@ -1,0 +1,62 @@
+[project]
+name = "cctv-worker"
+version = "1.0.0"
+description = "YOLO-based CCTV seat detection worker for Anding Study Cafe"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Anding Team", email = "dev@anding.co.kr"}
+]
+
+dependencies = [
+    "ultralytics>=8.0.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "pillow>=10.0.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+    "python-multipart>=0.0.6",
+    "supabase>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "python-dateutil>=2.8.0",
+    "pyyaml>=6.0.0",
+    "aiofiles>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+
+[project.scripts]
+cctv-worker = "src.workers.detection_worker:main"
+download-model = "scripts.download_model:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true

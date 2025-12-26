@@ -25,13 +25,12 @@ services:
 
   # CCTV 감지 워커 (YOLO)
   cctv-worker:
-    image: ghcr.io/muinlab/anding-cctv-worker:latest
-    # 또는 로컬 빌드:
-    # build:
-    #   context: ../anding-study-cafe/apps/cctv-worker
-    #   dockerfile: Dockerfile
+    build:
+      context: ./cctv-worker
+      dockerfile: Dockerfile
     container_name: cctv-worker
     restart: unless-stopped
+    network_mode: host
     depends_on:
       go2rtc:
         condition: service_healthy
@@ -46,6 +45,8 @@ services:
       - YOLO_MODEL=yolov8n.pt
       - SNAPSHOT_INTERVAL=3
       - LOG_LEVEL=INFO
+      - DEBUG_STREAM_ENABLED=${DEBUG_STREAM_ENABLED:-false}
+      - DEBUG_STREAM_PORT=8001
     volumes:
       - ./data/snapshots:/app/data/snapshots
       - ./logs/worker:/app/logs
@@ -53,8 +54,6 @@ services:
       resources:
         limits:
           memory: 2G
-    labels:
-      - "com.centurylinklabs.watchtower.scope=anding-cctv"
 
   # Cloudflare Tunnel (외부 접근) - 도메인 있을 때 사용
   cloudflared:
