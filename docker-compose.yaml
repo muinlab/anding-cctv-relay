@@ -20,6 +20,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    labels:
+      - "com.centurylinklabs.watchtower.scope=anding-cctv"
 
   # CCTV 감지 워커 (YOLO)
   cctv-worker:
@@ -51,6 +53,8 @@ services:
       resources:
         limits:
           memory: 2G
+    labels:
+      - "com.centurylinklabs.watchtower.scope=anding-cctv"
 
   # Cloudflare Tunnel (외부 접근) - 도메인 있을 때 사용
   cloudflared:
@@ -73,6 +77,9 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 86400 --cleanup
+    # 스코프 제한: anding-cctv 라벨이 있는 컨테이너만 업데이트
+    command: --interval 86400 --cleanup --scope anding-cctv
+    labels:
+      - "com.centurylinklabs.watchtower.scope=anding-cctv"
     profiles:
       - auto-update

@@ -55,18 +55,33 @@ sudo apt install -y \
 sudo systemctl enable ssh
 sudo systemctl start ssh
 
+# Docker 서비스 확인
+if ! sudo systemctl is-active --quiet docker; then
+  sudo systemctl start docker
+fi
+info "Docker 서비스 실행 중"
+
 # ============================================
 step 3 "Docker 권한 설정"
 # ============================================
 sudo usermod -aG docker $CURRENT_USER
+warn "Docker 그룹이 추가되었습니다. 스크립트 완료 후 'newgrp docker' 또는 재로그인 필요합니다."
 
 # ============================================
 step 4 "Tailscale 설치 (원격 접속용)"
 # ============================================
 if ! command -v tailscale &> /dev/null; then
   info "Tailscale 설치 중..."
-  curl -fsSL https://tailscale.com/install.sh | sh
-  info "Tailscale 설치 완료"
+  # 보안: 스크립트를 먼저 다운로드 후 실행
+  TAILSCALE_INSTALLER=$(mktemp)
+  if curl -fsSL https://tailscale.com/install.sh -o "$TAILSCALE_INSTALLER"; then
+    sh "$TAILSCALE_INSTALLER"
+    rm -f "$TAILSCALE_INSTALLER"
+    info "Tailscale 설치 완료"
+  else
+    rm -f "$TAILSCALE_INSTALLER"
+    warn "Tailscale 설치 실패. 나중에 수동 설치 필요."
+  fi
 else
   info "Tailscale 이미 설치됨"
 fi
@@ -78,12 +93,23 @@ PROJECT_DIR="$HOME/anding-cctv-relay"
 
 if [ -d "$PROJECT_DIR" ]; then
   info "기존 프로젝트 디렉토리 존재, git pull 실행"
-  cd "$PROJECT_DIR"
-  git pull origin main
+  cd "$PROJECT_DIR" || error "디렉토리 이동 실패"
+
+  # main 브랜치 확인
+  git checkout main 2>/dev/null || true
+
+  # pull 시도
+  if ! git pull origin main --ff-only; then
+    warn "git pull 실패. 로컬 변경사항이 있을 수 있습니다."
+    warn "수동 확인 필요: cd $PROJECT_DIR && git status"
+    error "git pull 실패로 설치 중단"
+  fi
 else
   info "프로젝트 클론 중..."
-  git clone https://github.com/muinlab/anding-cctv-relay.git "$PROJECT_DIR"
-  cd "$PROJECT_DIR"
+  if ! git clone https://github.com/muinlab/anding-cctv-relay.git "$PROJECT_DIR"; then
+    error "git clone 실패. 네트워크 연결을 확인하세요."
+  fi
+  cd "$PROJECT_DIR" || error "디렉토리 이동 실패"
 fi
 
 # 데이터 디렉토리 생성
@@ -93,31 +119,64 @@ mkdir -p "$PROJECT_DIR/data/snapshots" "$PROJECT_DIR/logs/worker"
 step 6 "환경변수 파일 설정"
 # ============================================
 if [ ! -f "$PROJECT_DIR/.env" ]; then
+  if [ ! -f "$PROJECT_DIR/.env.example" ]; then
+    error ".env.example 파일을 찾을 수 없습니다. 저장소가 손상되었을 수 있습니다."
+  fi
   cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
-  warn ".env 파일이 생성되었습니다."
+  chmod 600 "$PROJECT_DIR/.env"  # 보안: 소유자만 읽기/쓰기 가능
+  warn ".env 파일이 생성되었습니다. (권한: 600)"
   warn "나중에 편집 필요: nano $PROJECT_DIR/.env"
 else
   info ".env 파일 이미 존재"
+  chmod 600 "$PROJECT_DIR/.env"  # 권한 재확인
 fi
 
 # ============================================
 step 7 "systemd 서비스 설치"
 # ============================================
-SERVICE_FILE="$PROJECT_DIR/systemd/anding-cctv.service"
-FUNNEL_SERVICE_FILE="$PROJECT_DIR/systemd/tailscale-funnel.service"
 SYSTEMD_TARGET="/etc/systemd/system/anding-cctv.service"
 FUNNEL_SYSTEMD_TARGET="/etc/systemd/system/tailscale-funnel.service"
 
-if [ -f "$SERVICE_FILE" ]; then
-  # 사용자명 치환
-  sudo sed "s/anding/$CURRENT_USER/g" "$SERVICE_FILE" | sudo tee "$SYSTEMD_TARGET" > /dev/null
-  sudo sed -i "s|/home/anding|$HOME|g" "$SYSTEMD_TARGET"
-  info "anding-cctv 서비스 설치 완료"
-else
-  warn "anding-cctv 서비스 파일을 찾을 수 없음"
-fi
+# anding-cctv 서비스 생성 (변수 직접 대입)
+sudo tee "$SYSTEMD_TARGET" > /dev/null <<EOF
+[Unit]
+Description=Anding CCTV Streaming Service
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
 
-# Tailscale Funnel 서비스 설치
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$PROJECT_DIR
+
+# 시작 전 이미지 업데이트 (조용히)
+ExecStartPre=/usr/bin/docker compose pull --quiet
+
+# 자동 업데이트(watchtower) 포함해서 시작
+ExecStart=/usr/bin/docker compose --profile auto-update up -d
+
+# Graceful shutdown: 컨테이너 안전하게 종료
+ExecStop=/usr/bin/docker compose --profile auto-update down --timeout 30
+
+# 재시작 (설정 변경 후)
+ExecReload=/usr/bin/docker compose --profile auto-update restart
+
+User=$CURRENT_USER
+Group=docker
+TimeoutStartSec=600
+TimeoutStopSec=60
+
+# 환경변수 파일 로드
+EnvironmentFile=-$PROJECT_DIR/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+info "anding-cctv 서비스 설치 완료"
+
+# Tailscale Funnel 서비스
+FUNNEL_SERVICE_FILE="$PROJECT_DIR/systemd/tailscale-funnel.service"
 if [ -f "$FUNNEL_SERVICE_FILE" ]; then
   sudo cp "$FUNNEL_SERVICE_FILE" "$FUNNEL_SYSTEMD_TARGET"
   info "tailscale-funnel 서비스 설치 완료"
@@ -126,23 +185,53 @@ else
 fi
 
 sudo systemctl daemon-reload
-sudo systemctl enable anding-cctv
-info "systemd 서비스 등록 완료 (부팅 시 자동 시작)"
+
+# 서비스 파일 검증
+if ! systemctl cat anding-cctv.service >/dev/null 2>&1; then
+  error "서비스 파일 검증 실패"
+fi
+
+if sudo systemctl enable anding-cctv; then
+  info "systemd 서비스 등록 완료 (부팅 시 자동 시작)"
+else
+  error "서비스 등록 실패"
+fi
 
 # ============================================
 step 8 "방화벽 설정"
 # ============================================
 info "방화벽 설정 중..."
-sudo ufw --force enable
+
+# SSH 먼저 허용 (락아웃 방지)
+sudo ufw allow ssh
+
+# Tailscale 허용
+sudo ufw allow from 100.64.0.0/10 to any comment 'Tailscale'
+
+# 로컬 네트워크 감지 및 go2rtc 포트 허용
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+if [ -n "$LOCAL_IP" ]; then
+  # IP에서 /24 서브넷 추출 (예: 192.168.0.x -> 192.168.0.0/24)
+  LOCAL_SUBNET=$(echo "$LOCAL_IP" | sed 's/\.[0-9]*$/.0\/24/')
+  sudo ufw allow from "$LOCAL_SUBNET" to any port 1984 comment 'go2rtc local network'
+  info "로컬 네트워크: $LOCAL_SUBNET"
+else
+  # 폴백: 더 넓은 범위 허용
+  sudo ufw allow from 192.168.0.0/24 to any port 1984 comment 'go2rtc local network'
+  warn "로컬 IP 감지 실패. 192.168.0.0/24 허용"
+fi
+
+# 기본 정책 설정
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
-# SSH 허용 (로컬 네트워크 + Tailscale)
-sudo ufw allow ssh
-sudo ufw allow from 100.64.0.0/10 to any  # Tailscale IP 범위
-
-# go2rtc WebUI (로컬 네트워크만)
-sudo ufw allow from 192.168.0.0/16 to any port 1984
+# UFW 활성화
+if sudo ufw status | grep -q "Status: active"; then
+  info "UFW 이미 활성화됨"
+else
+  warn "UFW 방화벽을 활성화합니다."
+  sudo ufw --force enable
+fi
 
 info "방화벽 규칙 적용 완료"
 
@@ -174,7 +263,7 @@ echo ""
 echo "   필수 항목:"
 echo "   - STORE_ID=지점ID"
 echo "   - RTSP_HOST=NVR_IP주소"
-echo "   - RTSP_PASSWORD=NVR비밀번호"
+echo "   - RTSP_PASSWORD=NVR비밀번호 (특수문자 있으면 URL 인코딩 필요)"
 echo "   - SUPABASE_URL=https://xxx.supabase.co"
 echo "   - SUPABASE_SERVICE_ROLE_KEY=서비스키"
 echo ""
