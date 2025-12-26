@@ -36,42 +36,11 @@ WHERE store_id = 'oryudong';
 
 ## 스트리밍 방식 선택
 
-### 옵션 1: HLS (권장)
+### 옵션 1: WebRTC (권장)
 
-- 지연: 3-5초
-- 호환성: 최고 (모든 브라우저, 모바일)
-- 구현: 간단
-
-```typescript
-// HLS.js 사용
-import Hls from 'hls.js'
-
-function HlsPlayer({ src }: { src: string }) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    if (Hls.isSupported()) {
-      const hls = new Hls()
-      hls.loadSource(src)
-      hls.attachMedia(video)
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari 네이티브 HLS
-      video.src = src
-    }
-  }, [src])
-
-  return <video ref={videoRef} autoPlay muted playsInline />
-}
-```
-
-### 옵션 2: WebRTC
-
-- 지연: <1초
-- 호환성: 제한적 (NAT 이슈)
-- 구현: 복잡
+- 지연: <1초 (실시간)
+- 호환성: 대부분 브라우저 지원
+- 장점: 낮은 지연, 양방향 통신 가능
 
 ```typescript
 // WebRTC 플레이어
@@ -113,7 +82,43 @@ function WebRTCPlayer({ src }: { src: string }) {
 }
 ```
 
-### 옵션 3: MJPEG (폴백)
+### 옵션 2: HLS (폴백)
+
+- 지연: 3-5초
+- 호환성: 최고 (모든 브라우저, 모바일)
+- 용도: WebRTC 실패 시 폴백
+
+```typescript
+// HLS.js 사용
+import Hls from 'hls.js'
+
+function HlsPlayer({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        lowLatencyMode: true,
+        liveSyncDuration: 1,
+        liveMaxLatencyDuration: 3
+      })
+      hls.loadSource(src)
+      hls.attachMedia(video)
+      return () => hls.destroy()
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari 네이티브 HLS
+      video.src = src
+    }
+  }, [src])
+
+  return <video ref={videoRef} autoPlay muted playsInline />
+}
+```
+
+### 옵션 3: MJPEG (최종 폴백)
 
 - 지연: 1-2초
 - 호환성: 좋음
@@ -127,11 +132,13 @@ function MjpegPlayer({ src }: { src: string }) {
 
 ## 통합 플레이어 컴포넌트
 
+WebRTC → HLS → MJPEG 순서로 자동 폴백하는 통합 플레이어:
+
 ```typescript
 // apps/admin-web/src/components/cctv/stream-player.tsx
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Hls from 'hls.js'
 
 interface StreamPlayerProps {
@@ -140,7 +147,7 @@ interface StreamPlayerProps {
   className?: string
 }
 
-type StreamType = 'hls' | 'webrtc' | 'mjpeg'
+type StreamType = 'webrtc' | 'hls' | 'mjpeg'
 
 export function StreamPlayer({
   cctvBaseUrl,
@@ -148,48 +155,123 @@ export function StreamPlayer({
   className
 }: StreamPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [streamType, setStreamType] = useState<StreamType>('hls')
+  const pcRef = useRef<RTCPeerConnection | null>(null)
+  const [streamType, setStreamType] = useState<StreamType>('webrtc')
   const [error, setError] = useState<string | null>(null)
 
   const streamUrls = {
-    hls: `${cctvBaseUrl}/api/stream.m3u8?src=ch${channelId}`,
     webrtc: `${cctvBaseUrl}/api/webrtc?src=ch${channelId}`,
+    hls: `${cctvBaseUrl}/api/stream.m3u8?src=ch${channelId}`,
     mjpeg: `${cctvBaseUrl}/api/stream.mjpeg?src=ch${channelId}`
   }
 
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video || streamType === 'mjpeg') return
+  // WebRTC 연결
+  const connectWebRTC = useCallback(async (video: HTMLVideoElement) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    })
+    pcRef.current = pc
 
-    if (streamType === 'hls') {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          lowLatencyMode: true,
-          liveSyncDuration: 1,
-          liveMaxLatencyDuration: 5
-        })
-        hls.loadSource(streamUrls.hls)
-        hls.attachMedia(video)
-        hls.on(Hls.Events.ERROR, () => {
-          setError('HLS 연결 실패')
-          setStreamType('mjpeg')  // 폴백
-        })
-        return () => hls.destroy()
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = streamUrls.hls
+    pc.ontrack = (e) => {
+      video.srcObject = e.streams[0]
+    }
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed') {
+        setError('WebRTC 연결 실패, HLS로 전환')
+        setStreamType('hls')
       }
     }
 
-    // WebRTC 구현은 별도 함수로
-  }, [streamType, cctvBaseUrl, channelId])
+    try {
+      pc.addTransceiver('video', { direction: 'recvonly' })
+      pc.addTransceiver('audio', { direction: 'recvonly' })
+
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+
+      const res = await fetch(streamUrls.webrtc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body: offer.sdp
+      })
+
+      if (!res.ok) throw new Error('WebRTC negotiation failed')
+
+      const answer = await res.text()
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer })
+    } catch (err) {
+      console.error('WebRTC error:', err)
+      setError('WebRTC 연결 실패, HLS로 전환')
+      setStreamType('hls')
+    }
+  }, [streamUrls.webrtc])
+
+  // HLS 연결
+  const connectHLS = useCallback((video: HTMLVideoElement) => {
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        lowLatencyMode: true,
+        liveSyncDuration: 1,
+        liveMaxLatencyDuration: 3,
+        maxBufferLength: 3
+      })
+      hls.loadSource(streamUrls.hls)
+      hls.attachMedia(video)
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          setError('HLS 연결 실패, MJPEG로 전환')
+          setStreamType('mjpeg')
+        }
+      })
+      return () => hls.destroy()
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = streamUrls.hls
+    }
+  }, [streamUrls.hls])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    // 이전 연결 정리
+    if (pcRef.current) {
+      pcRef.current.close()
+      pcRef.current = null
+    }
+
+    if (streamType === 'webrtc') {
+      connectWebRTC(video)
+      return () => {
+        if (pcRef.current) {
+          pcRef.current.close()
+          pcRef.current = null
+        }
+      }
+    }
+
+    if (streamType === 'hls') {
+      return connectHLS(video)
+    }
+  }, [streamType, connectWebRTC, connectHLS])
 
   if (streamType === 'mjpeg') {
     return (
-      <img
-        src={streamUrls.mjpeg}
-        alt={`Channel ${channelId}`}
-        className={className}
-      />
+      <div className={className}>
+        <img
+          src={streamUrls.mjpeg}
+          alt={`Channel ${channelId}`}
+          className="h-full w-full object-cover"
+        />
+        {error && (
+          <div className="absolute bottom-2 left-2 bg-yellow-500 px-2 py-1 text-xs rounded">
+            {error}
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -203,10 +285,13 @@ export function StreamPlayer({
         className="h-full w-full object-cover"
       />
       {error && (
-        <div className="absolute bottom-2 left-2 bg-yellow-500 px-2 py-1 text-xs">
+        <div className="absolute bottom-2 left-2 bg-yellow-500 px-2 py-1 text-xs rounded">
           {error}
         </div>
       )}
+      <div className="absolute top-2 right-2 bg-black/50 px-2 py-1 text-xs text-white rounded">
+        {streamType.toUpperCase()}
+      </div>
     </div>
   )
 }

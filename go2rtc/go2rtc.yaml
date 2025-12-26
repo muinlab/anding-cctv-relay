@@ -14,21 +14,26 @@ rtsp:
   listen: ":8554"
   default_query: "video"
 
-# WebRTC 설정
+# WebRTC 설정 (권장 스트리밍 방식, <1초 지연)
 webrtc:
-  listen: ":8555/tcp"
-  candidates:
-    - stun:stun.l.google.com:19302
-    - stun:stun1.l.google.com:19302
-  # TURN 서버 (NAT 통과 필요시)
+  listen: ":8555"  # TCP + UDP 모두 지원 (권장)
+  ice_servers:
+    - urls: [stun:stun.l.google.com:19302]
+    - urls: [stun:stun1.l.google.com:19302]
+  # IPv4만 사용 (IPv6 비활성화로 연결 속도 향상)
+  filters:
+    networks: [udp4, tcp4]
+  # TURN 서버 (대칭 NAT 환경에서 필요시 활성화)
   # ice_servers:
-  #   - urls: [turn:a.turn.metered.ca:443?transport=tcp]
+  #   - urls: [stun:stun.l.google.com:19302]
+  #   - urls: [turn:turn.example.com:443?transport=tcp]
   #     username: ${TURN_USERNAME}
   #     credential: ${TURN_CREDENTIAL}
 
 # HLS 스트리밍 (WebRTC 실패시 폴백)
+# 참고: go2rtc HLS는 설정 옵션이 제한적 (세션 타임아웃 5초 고정)
+# 지연 최소화는 프론트엔드 HLS.js 설정으로 조절
 hls:
-  # HLS 자동 활성화
 
 # 스트림 정의
 # 환경변수로 RTSP URL 구성

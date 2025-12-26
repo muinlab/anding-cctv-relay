@@ -2,11 +2,34 @@
 
 ## go2rtc란?
 
-경량 스트리밍 서버로 RTSP를 WebRTC/HLS/MJPEG로 변환
+경량 스트리밍 서버로 RTSP를 WebRTC/HLS/MJPEG로 변환하는 오픈소스 미디어 서버
 
-- GitHub: https://github.com/AlexxIT/go2rtc
-- 저지연 WebRTC 지원
-- 트랜스코딩 없이 패스스루 가능 (CPU 절약)
+- **GitHub**: https://github.com/AlexxIT/go2rtc
+- **언어**: Go (단일 바이너리, 경량)
+- **라이선스**: MIT
+
+### 주요 특징
+
+| 특징 | 설명 |
+|------|------|
+| **저지연** | WebRTC로 1초 미만 지연 |
+| **패스스루** | 트랜스코딩 없이 원본 전달 (CPU 절약) |
+| **다중 프로토콜** | RTSP, WebRTC, HLS, MJPEG, MSE 지원 |
+| **NAT 통과** | STUN/TURN 지원으로 외부 접속 가능 |
+| **WebUI** | 내장 관리 인터페이스 |
+
+### 지원 프로토콜
+
+```
+입력 (Sources)          출력 (Consumers)
+─────────────────────   ─────────────────────
+RTSP                    WebRTC (권장, <1초)
+RTMP                    HLS (폴백, 3-5초)
+HTTP-FLV                MJPEG (최종 폴백)
+FFmpeg                  MSE
+HomeKit                 RTSP
+Exec                    MP4/JPEG
+```
 
 ## 설정 파일 구조
 
@@ -24,14 +47,108 @@ rtsp:
   listen: ":8554"  # RTSP 출력 (cctv-worker용)
 
 webrtc:
-  listen: ":8555/tcp"
-  candidates:
-    - stun:stun.l.google.com:19302
+  listen: ":8555"           # TCP + UDP 모두 지원
+  ice_servers:
+    - urls: [stun:stun.l.google.com:19302]
+    - urls: [stun:stun1.l.google.com:19302]
+
+hls:
+  # HLS 자동 활성화 (설정 옵션 제한적)
 
 streams:
   ch1:
     - "rtsp://user:pass@192.168.0.100:554/live_01"
 ```
+
+## WebRTC 상세 설정
+
+WebRTC는 **권장 스트리밍 방식**으로, 1초 미만의 지연을 제공합니다.
+
+### 기본 설정
+
+```yaml
+webrtc:
+  listen: ":8555"  # TCP + UDP 모두 사용 (권장)
+  # listen: ":8555/tcp"  # TCP만 사용
+  # listen: ""           # 랜덤 UDP만 사용
+```
+
+### ICE 서버 설정
+
+```yaml
+webrtc:
+  ice_servers:
+    # STUN 서버 (NAT 타입 확인용)
+    - urls: [stun:stun.l.google.com:19302]
+    - urls: [stun:stun1.l.google.com:19302]
+
+    # TURN 서버 (NAT 통과 필요시)
+    - urls: [turn:turn.example.com:443?transport=tcp]
+      username: ${TURN_USERNAME}
+      credential: ${TURN_CREDENTIAL}
+```
+
+### 필터 옵션
+
+```yaml
+webrtc:
+  filters:
+    networks: [udp4, tcp4]     # IPv4만 사용
+    # networks: [udp4, udp6, tcp4, tcp6]  # 전체
+
+    candidates: []              # 특정 IP만 허용 (빈 배열 = 자동)
+    loopback: false             # localhost 허용 여부
+    interfaces: []              # 특정 네트워크 인터페이스만
+    ips: []                     # 특정 IP만
+    udp_ports: [50000, 50100]   # UDP 포트 범위
+```
+
+### NAT 환경별 설정
+
+| 환경 | 설정 |
+|------|------|
+| **로컬 네트워크** | STUN만으로 충분 |
+| **NAT 뒤 (대칭 NAT)** | TURN 서버 필요 |
+| **Cloudflare Tunnel** | WebRTC 불가, HLS 사용 |
+
+## HLS 상세 설정
+
+HLS는 WebRTC 실패 시 **폴백 옵션**으로 사용됩니다.
+
+### 제한사항
+
+go2rtc의 HLS는 설정 옵션이 제한적입니다:
+
+| 항목 | 값 | 설명 |
+|------|-----|------|
+| **세션 타임아웃** | 5초 | 고정값, 변경 불가 |
+| **세그먼트 길이** | 자동 | go2rtc 내부 결정 |
+| **플레이리스트 크기** | 자동 | go2rtc 내부 결정 |
+
+### 지연 최소화 (프론트엔드)
+
+HLS 지연은 **클라이언트(HLS.js) 설정**으로 최적화합니다:
+
+```typescript
+import Hls from 'hls.js'
+
+const hls = new Hls({
+  lowLatencyMode: true,        // 저지연 모드
+  liveSyncDuration: 1,         // 라이브 동기화 버퍼 (초)
+  liveMaxLatencyDuration: 3,   // 최대 허용 지연 (초)
+  maxBufferLength: 3,          // 최대 버퍼 길이 (초)
+})
+```
+
+### HLS vs WebRTC 비교
+
+| 항목 | WebRTC | HLS |
+|------|--------|-----|
+| **지연** | <1초 | 3-5초 |
+| **호환성** | 대부분 브라우저 | 모든 브라우저/모바일 |
+| **NAT 통과** | STUN/TURN 필요 | HTTP로 문제없음 |
+| **Cloudflare** | UDP 차단됨 | 정상 작동 |
+| **CPU 사용** | 낮음 | 낮음 |
 
 ## 스트림 소스 형식
 
