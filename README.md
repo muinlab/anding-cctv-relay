@@ -40,12 +40,7 @@
 
 ```powershell
 # PowerShell에서 한 줄로 설치 (관리자 권한 자동 요청)
-irm https://anding.kr/cctv | iex
-```
-
-또는 수동으로 관리자 PowerShell에서:
-```powershell
-irm https://raw.githubusercontent.com/muinlab/anding-cctv-relay/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/muinlab/anding-cctv-relay/main/scripts/bootstrap.ps1 | iex
 ```
 
 수동 설치:
