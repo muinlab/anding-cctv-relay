@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  # RTSP -> WebRTC/HLS 스트리밍 서버
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: go2rtc
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - RTSP_HOST=${RTSP_HOST}
+      - RTSP_PORT=${RTSP_PORT}
+      - RTSP_USERNAME=${RTSP_USERNAME}
+      - RTSP_PASSWORD=${RTSP_PASSWORD}
+    volumes:
+      - ./go2rtc/go2rtc.yaml:/config/go2rtc.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:1984/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # CCTV 감지 워커 (YOLO)
+  cctv-worker:
+    image: ghcr.io/muinlab/anding-cctv-worker:latest
+    # 또는 로컬 빌드:
+    # build:
+    #   context: ../anding-study-cafe/apps/cctv-worker
+    #   dockerfile: Dockerfile
+    container_name: cctv-worker
+    restart: unless-stopped
+    depends_on:
+      go2rtc:
+        condition: service_healthy
+    environment:
+      - STORE_ID=${STORE_ID}
+      - RTSP_HOST=localhost
+      - RTSP_PORT=8554
+      - RTSP_USERNAME=
+      - RTSP_PASSWORD=
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - YOLO_MODEL=yolov8n.pt
+      - SNAPSHOT_INTERVAL=3
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data/snapshots:/app/data/snapshots
+      - ./logs/worker:/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Cloudflare Tunnel (외부 접근)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      go2rtc:
+        condition: service_healthy
+
+  # 자동 업데이트 (선택)
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 86400 --cleanup
+    profiles:
+      - auto-update

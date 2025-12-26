@@ -1,0 +1,54 @@
+# go2rtc 설정 파일
+# 문서: https://github.com/AlexxIT/go2rtc
+
+log:
+  level: info
+
+# API 서버 (WebUI + REST)
+api:
+  listen: ":1984"
+  origin: "*"
+
+# RTSP 출력 서버 (cctv-worker용)
+rtsp:
+  listen: ":8554"
+  default_query: "video"
+
+# WebRTC 설정
+webrtc:
+  listen: ":8555/tcp"
+  candidates:
+    - stun:stun.l.google.com:19302
+    - stun:stun1.l.google.com:19302
+  # TURN 서버 (NAT 통과 필요시)
+  # ice_servers:
+  #   - urls: [turn:a.turn.metered.ca:443?transport=tcp]
+  #     username: ${TURN_USERNAME}
+  #     credential: ${TURN_CREDENTIAL}
+
+# HLS 스트리밍 (WebRTC 실패시 폴백)
+hls:
+  # HLS 자동 활성화
+
+# 스트림 정의
+# 환경변수로 RTSP URL 구성
+streams:
+  # 채널 1
+  ch1:
+    - "rtsp://${RTSP_USERNAME}:${RTSP_PASSWORD}@${RTSP_HOST}:${RTSP_PORT}/live_01"
+
+  # 채널 2
+  ch2:
+    - "rtsp://${RTSP_USERNAME}:${RTSP_PASSWORD}@${RTSP_HOST}:${RTSP_PORT}/live_02"
+
+  # 채널 3
+  ch3:
+    - "rtsp://${RTSP_USERNAME}:${RTSP_PASSWORD}@${RTSP_HOST}:${RTSP_PORT}/live_03"
+
+  # 채널 4
+  ch4:
+    - "rtsp://${RTSP_USERNAME}:${RTSP_PASSWORD}@${RTSP_HOST}:${RTSP_PORT}/live_04"
+
+# FFmpeg 설정 (트랜스코딩 필요시)
+ffmpeg:
+  bin: ffmpeg
