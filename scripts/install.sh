@@ -104,19 +104,30 @@ fi
 step 7 "systemd 서비스 설치"
 # ============================================
 SERVICE_FILE="$PROJECT_DIR/systemd/anding-cctv.service"
+FUNNEL_SERVICE_FILE="$PROJECT_DIR/systemd/tailscale-funnel.service"
 SYSTEMD_TARGET="/etc/systemd/system/anding-cctv.service"
+FUNNEL_SYSTEMD_TARGET="/etc/systemd/system/tailscale-funnel.service"
 
 if [ -f "$SERVICE_FILE" ]; then
   # 사용자명 치환
   sudo sed "s/anding/$CURRENT_USER/g" "$SERVICE_FILE" | sudo tee "$SYSTEMD_TARGET" > /dev/null
   sudo sed -i "s|/home/anding|$HOME|g" "$SYSTEMD_TARGET"
-
-  sudo systemctl daemon-reload
-  sudo systemctl enable anding-cctv
-  info "systemd 서비스 설치 완료 (부팅 시 자동 시작)"
+  info "anding-cctv 서비스 설치 완료"
 else
-  warn "systemd 서비스 파일을 찾을 수 없음"
+  warn "anding-cctv 서비스 파일을 찾을 수 없음"
 fi
+
+# Tailscale Funnel 서비스 설치
+if [ -f "$FUNNEL_SERVICE_FILE" ]; then
+  sudo cp "$FUNNEL_SERVICE_FILE" "$FUNNEL_SYSTEMD_TARGET"
+  info "tailscale-funnel 서비스 설치 완료"
+else
+  warn "tailscale-funnel 서비스 파일을 찾을 수 없음"
+fi
+
+sudo systemctl daemon-reload
+sudo systemctl enable anding-cctv
+info "systemd 서비스 등록 완료 (부팅 시 자동 시작)"
 
 # ============================================
 step 8 "방화벽 설정"
@@ -164,23 +175,28 @@ echo "   필수 항목:"
 echo "   - STORE_ID=지점ID"
 echo "   - RTSP_HOST=NVR_IP주소"
 echo "   - RTSP_PASSWORD=NVR비밀번호"
-echo "   - CLOUDFLARE_TUNNEL_TOKEN=터널토큰"
 echo "   - SUPABASE_URL=https://xxx.supabase.co"
 echo "   - SUPABASE_SERVICE_ROLE_KEY=서비스키"
 echo ""
-echo "4. 서비스 시작:"
+echo "4. Tailscale Funnel 활성화 (외부 접속용):"
+echo "   ${BLUE}sudo tailscale funnel 1984${NC}"
+echo "   → 자동 생성된 URL로 외부에서 접속 가능"
+echo ""
+echo "5. 서비스 시작:"
 echo "   ${BLUE}sudo systemctl start anding-cctv${NC}"
 echo ""
-echo "5. 상태 확인:"
+echo "6. 상태 확인:"
 echo "   ${BLUE}sudo systemctl status anding-cctv${NC}"
 echo "   ${BLUE}docker compose ps${NC}"
 echo ""
 echo "========================================="
 echo -e "${GREEN}유용한 명령어${NC}"
 echo "========================================="
-echo "로그 보기:     docker compose logs -f"
-echo "재시작:        sudo systemctl restart anding-cctv"
-echo "중지:          sudo systemctl stop anding-cctv"
-echo "Tailscale IP:  tailscale ip -4"
-echo "SSH 접속:      ssh $CURRENT_USER@<tailscale-ip>"
+echo "로그 보기:       docker compose logs -f"
+echo "재시작:          sudo systemctl restart anding-cctv"
+echo "중지:            sudo systemctl stop anding-cctv"
+echo "Tailscale IP:    tailscale ip -4"
+echo "Funnel 상태:     tailscale funnel status"
+echo "Funnel URL 확인: tailscale funnel status | grep https"
+echo "SSH 접속:        ssh $CURRENT_USER@<tailscale-ip>"
 echo ""

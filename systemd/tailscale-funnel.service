@@ -1,0 +1,15 @@
+[Unit]
+Description=Tailscale Funnel for go2rtc
+After=tailscaled.service anding-cctv.service
+Requires=tailscaled.service
+Wants=anding-cctv.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tailscale funnel --bg 1984
+ExecStop=/usr/bin/tailscale funnel off 1984
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

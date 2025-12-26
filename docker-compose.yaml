@@ -52,7 +52,7 @@ services:
         limits:
           memory: 2G
 
-  # Cloudflare Tunnel (외부 접근)
+  # Cloudflare Tunnel (외부 접근) - 도메인 있을 때 사용
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
@@ -63,6 +63,8 @@ services:
     depends_on:
       go2rtc:
         condition: service_healthy
+    profiles:
+      - cloudflare
 
   # 자동 업데이트 (선택)
   watchtower:
