@@ -106,6 +106,7 @@ sudo systemctl start anding-cctv
 - [운영 및 모니터링](docs/07-operations.md)
 - [문제 해결](docs/08-troubleshooting.md)
 - [**Windows WSL2 설치**](docs/09-windows-wsl2-setup.md)
+- [**다중 지점 관리**](docs/10-multi-store.md)
 
 ### cctv-worker 문서
 
