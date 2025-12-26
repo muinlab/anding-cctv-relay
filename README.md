@@ -6,7 +6,7 @@
 
 - Vercel(서버리스)에서는 RTSP 스트리밍 불가능
 - 지점 내 미니PC가 RTSP → WebRTC/HLS 변환 후 웹으로 중계
-- Cloudflare Tunnel로 포트포워딩 없이 외부 접근
+- Tailscale Funnel 또는 Cloudflare Tunnel로 외부 접근
 
 ## 아키텍처
 
@@ -26,8 +26,8 @@
 │                            │                  │              │
 └────────────────────────────┼──────────────────┼──────────────┘
                              │                  │
-          Cloudflare Tunnel  │                  │ Supabase
-                             ▼                  ▼
+     Tailscale Funnel 또는   │                  │ Supabase
+     Cloudflare Tunnel       ▼                  ▼
                     ┌──────────────┐    ┌──────────────┐
                     │  admin-web   │    │   Realtime   │
                     │  (Vercel)    │    │   DB 업데이트 │
@@ -36,17 +36,51 @@
 
 ## 빠른 시작
 
-```bash
-# 1. 레포 클론
+### Windows (권장)
+
+```powershell
+# PowerShell 관리자 권한으로 실행
+Set-ExecutionPolicy Bypass -Scope Process -Force
+irm https://raw.githubusercontent.com/muinlab/anding-cctv-relay/main/scripts/install.ps1 | iex
+```
+
+또는 수동 설치:
+```powershell
+# 1. Docker Desktop, Git, Tailscale 설치 (winget 사용)
+winget install -e --id Docker.DockerDesktop
+winget install -e --id Git.Git
+winget install -e --id Tailscale.Tailscale
+
+# 2. 레포 클론
 git clone https://github.com/muinlab/anding-cctv-relay.git
 cd anding-cctv-relay
 
-# 2. 환경변수 설정
-cp .env.example .env
-nano .env
+# 3. 환경변수 설정
+copy .env.example .env
+notepad .env
 
-# 3. 실행
-docker compose up -d
+# 4. 실행
+docker compose --profile auto-update up -d
+
+# 5. Tailscale Funnel 활성화 (외부 접속용)
+& "C:\Program Files\Tailscale\tailscale.exe" funnel 1984
+```
+
+### Ubuntu/Linux
+
+```bash
+# 1. 자동 설치 스크립트 실행
+curl -fsSL https://raw.githubusercontent.com/muinlab/anding-cctv-relay/main/scripts/install.sh | bash
+
+# 2. 환경변수 설정
+nano ~/anding-cctv-relay/.env
+
+# 3. Tailscale 로그인 및 Funnel 활성화
+sudo tailscale up
+sudo tailscale funnel 1984
+
+# 4. 서비스 시작
+sudo systemctl start anding-cctv
 ```
 
 ## 문서
@@ -69,20 +103,24 @@ anding-cctv-relay/
 ├── go2rtc/
 │   └── go2rtc.yaml         # 스트리밍 서버 설정
 ├── scripts/
-│   ├── install.sh          # 초기 설치 스크립트
-│   ├── health-check.sh     # 상태 체크
-│   └── backup.sh           # 백업
+│   ├── install.ps1         # Windows 설치 스크립트 (PowerShell)
+│   ├── install.sh          # Linux 설치 스크립트 (Bash)
+│   ├── start.bat           # Windows 시작 스크립트 (자동 생성)
+│   └── stop.bat            # Windows 종료 스크립트 (자동 생성)
 ├── systemd/
-│   └── anding-cctv.service # systemd 서비스 파일
+│   ├── anding-cctv.service         # Linux systemd 서비스
+│   └── tailscale-funnel.service    # Tailscale Funnel 서비스
 └── docs/                   # 상세 문서
 ```
 
 ## 지점별 배포
 
-| 지점 | 도메인 | 상태 |
-|-----|--------|------|
-| 오류동역 | `cctv-oryudong.anding.kr` | 예정 |
-| 강남구청역 | `cctv-gangnam.anding.kr` | 예정 |
+| 지점 | 접속 URL | 상태 |
+|-----|---------|------|
+| 오류동역 | Tailscale Funnel URL | 예정 |
+| 강남구청역 | Tailscale Funnel URL | 예정 |
+
+> Tailscale Funnel 활성화 후 `tailscale funnel status`로 URL 확인
 
 ## 라이선스
 
