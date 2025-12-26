@@ -39,12 +39,16 @@
 ### Windows (권장)
 
 ```powershell
-# PowerShell 관리자 권한으로 실행
-Set-ExecutionPolicy Bypass -Scope Process -Force
+# PowerShell에서 한 줄로 설치 (관리자 권한 자동 요청)
+irm https://anding.kr/cctv | iex
+```
+
+또는 수동으로 관리자 PowerShell에서:
+```powershell
 irm https://raw.githubusercontent.com/muinlab/anding-cctv-relay/main/scripts/install.ps1 | iex
 ```
 
-또는 수동 설치:
+수동 설치:
 ```powershell
 # 1. Docker Desktop, Git, Tailscale 설치 (winget 사용)
 winget install -e --id Docker.DockerDesktop
@@ -103,6 +107,7 @@ anding-cctv-relay/
 ├── go2rtc/
 │   └── go2rtc.yaml         # 스트리밍 서버 설정
 ├── scripts/
+│   ├── bootstrap.ps1       # Windows 부트스트랩 (관리자 자동 요청)
 │   ├── install.ps1         # Windows 설치 스크립트 (PowerShell)
 │   ├── install.sh          # Linux 설치 스크립트 (Bash)
 │   ├── start.bat           # Windows 시작 스크립트 (자동 생성)
