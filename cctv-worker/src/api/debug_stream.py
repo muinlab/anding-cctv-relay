@@ -5,7 +5,7 @@ bounding boxes overlaid on the video feed for debugging purposes.
 """
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
-from typing import Generator, Optional
+from typing import Generator, Optional, Dict, List
 import threading
 import logging
 import numpy as np
@@ -40,21 +40,163 @@ _detector_lock = threading.Lock()
 def get_detector() -> PersonDetector:
     """Get or create YOLO detector instance (thread-safe)."""
     global _detector
-    if _detector is None:
-        with _detector_lock:
-            # Double-checked locking
-            if _detector is None:
-                logger.info("Initializing YOLO detector...")
-                _detector = PersonDetector(
-                    model_path=settings.YOLO_MODEL,
-                    confidence=settings.CONFIDENCE_THRESHOLD
-                )
-                logger.info("YOLO detector initialized")
+    with _detector_lock:
+        if _detector is None:
+            logger.info("Initializing YOLO detector...")
+            _detector = PersonDetector(
+                model_path=settings.YOLO_MODEL,
+                confidence=settings.CONFIDENCE_THRESHOLD
+            )
+            logger.info("YOLO detector initialized")
     return _detector
 
 
-def get_roi_matcher(channel_id: int) -> Optional[ROIMatcher]:
-    """Get ROI matcher for channel if config exists."""
+# 캐시된 ROI 데이터 (정규화 좌표)
+_roi_cache: Dict[int, List[Dict]] = {}
+_roi_cache_lock = threading.Lock()
+
+
+def _get_roi_data_from_supabase(channel_id: int) -> List[Dict]:
+    """Supabase에서 ROI 데이터 조회 (캐싱됨).
+
+    Args:
+        channel_id: CCTV 채널 번호
+
+    Returns:
+        좌석 ROI 데이터 리스트 (정규화 좌표)
+    """
+    with _roi_cache_lock:
+        if channel_id in _roi_cache:
+            # 캐시된 데이터를 락 안에서 복사하여 반환
+            return list(_roi_cache[channel_id])
+
+    try:
+        from src.database.seat_repository import get_seat_repository
+
+        repo = get_seat_repository()
+        seats = repo.get_seats_by_channel(settings.STORE_ID, channel_id)
+
+        # 유효한 좌석만 필터링 (정규화 좌표 검증)
+        valid_seats = []
+        for s in seats:
+            roi = s.get('roi_polygon')
+
+            # ROI가 없거나 점이 3개 미만이면 스킵
+            if not roi or not isinstance(roi, list) or len(roi) < 3:
+                continue
+
+            # 정규화 좌표 검증 (0.0 ~ 1.0 범위)
+            try:
+                is_normalized = all(
+                    isinstance(point, (list, tuple)) and
+                    len(point) >= 2 and
+                    0 <= float(point[0]) <= 1 and
+                    0 <= float(point[1]) <= 1
+                    for point in roi
+                )
+            except (TypeError, ValueError):
+                logger.warning(f"좌석 {s['seat_id']}: 잘못된 좌표 형식, 스킵")
+                continue
+
+            if not is_normalized:
+                logger.warning(f"좌석 {s['seat_id']}: 비정규화 좌표 감지, 스킵")
+                continue
+
+            valid_seats.append({
+                'id': s['seat_id'],
+                'roi_normalized': roi,  # 정규화 좌표 보관
+                'label': s.get('seat_label') or f"{s['seat_id']}번"
+            })
+
+        with _roi_cache_lock:
+            _roi_cache[channel_id] = valid_seats
+
+        if valid_seats:
+            logger.info(f"채널 {channel_id}: {len(valid_seats)}개 ROI 로드 완료")
+        else:
+            logger.info(f"채널 {channel_id}: ROI 설정 없음 (YOLO만 표시)")
+
+        return valid_seats
+
+    except Exception as e:
+        logger.error(f"ROI 데이터 로드 실패 (채널 {channel_id}): {e}")
+        return []
+
+
+def get_roi_matcher(channel_id: int, frame_width: int = 1920, frame_height: int = 1080) -> Optional[ROIMatcher]:
+    """Get ROI matcher for channel from Supabase (with fallback).
+
+    정규화 좌표(0.0~1.0)를 실제 프레임 해상도에 맞게 픽셀 좌표로 변환합니다.
+    Supabase에서 ROI 로드 실패해도 YOLO 스트림은 계속 동작합니다.
+
+    Args:
+        channel_id: CCTV 채널 번호
+        frame_width: 프레임 너비 (픽셀)
+        frame_height: 프레임 높이 (픽셀)
+
+    Returns:
+        ROIMatcher 또는 None (ROI 없거나 에러 시)
+    """
+    try:
+        roi_data = _get_roi_data_from_supabase(channel_id)
+
+        if not roi_data:
+            return None
+
+        # 정규화 좌표를 픽셀 좌표로 변환
+        pixel_seats = []
+        for seat in roi_data:
+            normalized_roi = seat['roi_normalized']
+
+            # 정규화 좌표 → 픽셀 좌표 변환 (round()로 정확한 반올림)
+            pixel_roi = [
+                [round(point[0] * frame_width), round(point[1] * frame_height)]
+                for point in normalized_roi
+            ]
+
+            pixel_seats.append({
+                'id': seat['id'],
+                'roi': pixel_roi,
+                'type': 'polygon',
+                'label': seat['label']
+            })
+
+        # ROIMatcher 설정 생성
+        config = {
+            'camera_id': f'{settings.STORE_ID}_cam{channel_id}',
+            'resolution': [frame_width, frame_height],
+            'seats': pixel_seats
+        }
+
+        return ROIMatcher(config)
+
+    except Exception as e:
+        # 에러가 발생해도 YOLO 스트림은 계속 동작
+        logger.error(f"ROI 로드 실패 (채널 {channel_id}): {e}")
+        return None
+
+
+def invalidate_roi_cache(channel_id: Optional[int] = None) -> None:
+    """ROI 캐시 무효화.
+
+    Args:
+        channel_id: 특정 채널만 무효화 (None이면 전체)
+    """
+    with _roi_cache_lock:
+        if channel_id is not None:
+            _roi_cache.pop(channel_id, None)
+            logger.debug(f"ROI cache invalidated: channel {channel_id}")
+        else:
+            _roi_cache.clear()
+            logger.debug("All ROI cache cleared")
+
+
+def get_roi_matcher_from_file(channel_id: int) -> Optional[ROIMatcher]:
+    """[Deprecated] 로컬 JSON 파일에서 ROI 로드 (fallback용).
+
+    기존 방식으로 로컬 JSON 파일에서 ROI를 로드합니다.
+    Supabase 연동 전 테스트나 완전 오프라인 환경에서 사용.
+    """
     config_path = settings.ROI_CONFIG_DIR / f"channel_{channel_id:02d}.json"
     if config_path.exists():
         return ROIMatcher(config_path)
@@ -80,7 +222,10 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
 
     client = RTSPClient(rtsp_url)
     detector = get_detector()
-    roi_matcher = get_roi_matcher(channel_id)
+
+    # ROI matcher는 첫 프레임 캡처 후 해상도 확인 후 초기화
+    roi_matcher: Optional[ROIMatcher] = None
+    roi_initialized = False
 
     frame_interval = 1.0 / fps
     error_count = 0
@@ -120,11 +265,20 @@ def generate_mjpeg_stream(channel_id: int, fps: int = 5) -> Generator[bytes, Non
                         continue
                     # Reset error count on successful reconnection
                     error_count = 0
+                    roi_initialized = False  # 재연결 시 ROI 다시 초기화
                     logger.info(f"Reconnected to channel {channel_id}")
                     continue
 
                 # Reset error count on successful frame
                 error_count = 0
+
+                # 첫 프레임에서 해상도 확인 후 ROI matcher 초기화
+                if not roi_initialized:
+                    frame_height, frame_width = frame.shape[:2]
+                    roi_matcher = get_roi_matcher(channel_id, frame_width, frame_height)
+                    roi_initialized = True
+                    if roi_matcher:
+                        logger.info(f"ROI matcher initialized for channel {channel_id} ({frame_width}x{frame_height})")
 
                 # Detect persons
                 detections = detector.detect_persons(frame)
@@ -363,7 +517,6 @@ async def snapshot_channel(channel_id: int):
 
     client = RTSPClient(rtsp_url)
     detector = get_detector()
-    roi_matcher = get_roi_matcher(channel_id)
 
     try:
         if not client.connect(timeout=10):
@@ -372,6 +525,10 @@ async def snapshot_channel(channel_id: int):
         frame = client.capture_frame()
         if frame is None:
             raise HTTPException(status_code=500, detail="Failed to capture frame")
+
+        # 프레임 해상도 확인 후 ROI matcher 초기화
+        frame_height, frame_width = frame.shape[:2]
+        roi_matcher = get_roi_matcher(channel_id, frame_width, frame_height)
 
         # Detect and annotate
         detections = detector.detect_persons(frame)

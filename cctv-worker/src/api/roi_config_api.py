@@ -1,5 +1,6 @@
 """FastAPI endpoints for ROI configuration management."""
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -21,6 +22,27 @@ from src.api.debug_stream import router as debug_router
 
 
 app = FastAPI(title="CCTV ROI Configuration API")
+
+# CORS 설정 (admin-web에서 접근 허용)
+CORS_ORIGINS = [
+    "https://admin.anding.kr",
+    "https://anding.kr",
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+
+# 환경변수로 추가 origin 설정 가능
+extra_origins = os.getenv("CORS_ORIGINS", "")
+if extra_origins:
+    CORS_ORIGINS.extend([o.strip() for o in extra_origins.split(",") if o.strip()])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 # Include debug stream router if enabled
 if os.getenv("DEBUG_STREAM_ENABLED", "false").lower() == "true":

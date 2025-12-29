@@ -38,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libgl1 \
     ffmpeg \
+    curl \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder
@@ -53,8 +55,8 @@ COPY pyproject.toml .
 RUN mkdir -p data/roi_configs data/snapshots logs && \
     chmod +x entrypoint.sh
 
-# Download YOLO model (optional, can mount from host)
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" || true
+# Download YOLO model (yolo11n for better CPU performance)
+RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')" || true
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
@@ -66,9 +68,9 @@ EXPOSE 8001
 # Health check - check API if debug enabled, otherwise just check process
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD if [ "${DEBUG_STREAM_ENABLED:-false}" = "true" ]; then \
-        wget -q --spider http://localhost:${DEBUG_STREAM_PORT:-8001}/debug/status || exit 1; \
+        curl -sf http://localhost:${DEBUG_STREAM_PORT:-8001}/debug/status || exit 1; \
     else \
-        python -c "import sys; sys.exit(0)"; \
+        pgrep -f "detection_worker" > /dev/null || exit 1; \
     fi
 
 # Default command

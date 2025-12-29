@@ -108,6 +108,7 @@ sudo systemctl start anding-cctv
 - [**Windows WSL2 설치**](docs/09-windows-wsl2-setup.md)
 - [**다중 지점 관리**](docs/10-multi-store.md)
 - [**Supabase 배포 가이드**](docs/11-supabase-deployment.md)
+- [**스트리밍 기술 학습 가이드**](docs/99-learning-resources.md)
 
 ### cctv-worker 문서
 
