@@ -3,11 +3,25 @@ name: Deploy to CCTV Relay Servers
 on:
   push:
     branches:
-      - deploy
+      - deploy/oryudong    # 오류동역점 전용
+      # - deploy/gangnam   # 추후 지점 추가시
+      # - deploy/hongdae
+  workflow_dispatch:
+    inputs:
+      store_id:
+        description: '배포할 지점 ID'
+        required: true
+        default: 'oryudong'
+        type: choice
+        options:
+          - oryudong
+          # - gangnam
+          # - hongdae
 
 jobs:
   deploy-oryudong:
     name: Deploy to 오류동역점
+    if: github.ref == 'refs/heads/deploy/oryudong' || (github.event_name == 'workflow_dispatch' && github.event.inputs.store_id == 'oryudong')
     runs-on: [self-hosted, oryudong]
     env:
       STORE_ID: oryudong
@@ -24,24 +38,51 @@ jobs:
 
       - name: Restart go2rtc
         run: |
-          docker compose down go2rtc || true
+          # 컨테이너가 있으면 중지, 없으면 무시
+          if docker compose ps go2rtc --quiet 2>/dev/null; then
+            docker compose down go2rtc
+          fi
           docker compose up -d go2rtc
 
       - name: Health check go2rtc
         run: |
-          sleep 5
-          curl -sf http://localhost:1984/api || exit 1
-          echo "go2rtc is healthy"
+          echo "Waiting for go2rtc..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:1984/api >/dev/null 2>&1; then
+              echo "go2rtc is healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ERROR: go2rtc failed to start"
+          docker compose logs go2rtc
+          exit 1
 
       - name: Build and start cctv-worker
         run: |
+          set -e
+          echo "Building cctv-worker..."
           docker compose build cctv-worker
+          echo "Starting cctv-worker..."
           docker compose up -d cctv-worker
 
       - name: Health check cctv-worker
         run: |
-          sleep 30
-          docker compose ps cctv-worker
+          echo "Waiting for cctv-worker (60s startup time)..."
+          for i in {1..60}; do
+            STATUS=$(docker inspect --format='{{.State.Status}}' cctv-worker 2>/dev/null || echo "not found")
+            if [ "$STATUS" = "running" ]; then
+              RESTARTS=$(docker inspect --format='{{.RestartCount}}' cctv-worker)
+              if [ "$RESTARTS" = "0" ]; then
+                echo "cctv-worker is healthy after ${i}s"
+                exit 0
+              fi
+            fi
+            sleep 1
+          done
+          echo "ERROR: cctv-worker failed to start properly"
+          docker compose logs --tail=50 cctv-worker
+          exit 1
 
       - name: Show status
         run: |
@@ -49,7 +90,7 @@ jobs:
           docker compose ps
           echo ""
           echo "=== Available Streams ==="
-          curl -s http://localhost:1984/api/streams | jq 'keys'
+          curl -sf http://localhost:1984/api/streams | jq 'keys' || echo "(no streams)"
           echo ""
           echo "=== cctv-worker logs ==="
           docker compose logs --tail=20 cctv-worker
