@@ -40,16 +40,14 @@ _detector_lock = threading.Lock()
 def get_detector() -> PersonDetector:
     """Get or create YOLO detector instance (thread-safe)."""
     global _detector
-    if _detector is None:
-        with _detector_lock:
-            # Double-checked locking
-            if _detector is None:
-                logger.info("Initializing YOLO detector...")
-                _detector = PersonDetector(
-                    model_path=settings.YOLO_MODEL,
-                    confidence=settings.CONFIDENCE_THRESHOLD
-                )
-                logger.info("YOLO detector initialized")
+    with _detector_lock:
+        if _detector is None:
+            logger.info("Initializing YOLO detector...")
+            _detector = PersonDetector(
+                model_path=settings.YOLO_MODEL,
+                confidence=settings.CONFIDENCE_THRESHOLD
+            )
+            logger.info("YOLO detector initialized")
     return _detector
 
 
@@ -69,7 +67,8 @@ def _get_roi_data_from_supabase(channel_id: int) -> List[Dict]:
     """
     with _roi_cache_lock:
         if channel_id in _roi_cache:
-            return _roi_cache[channel_id]
+            # 캐시된 데이터를 락 안에서 복사하여 반환
+            return list(_roi_cache[channel_id])
 
     try:
         from src.database.seat_repository import get_seat_repository
@@ -149,9 +148,9 @@ def get_roi_matcher(channel_id: int, frame_width: int = 1920, frame_height: int 
         for seat in roi_data:
             normalized_roi = seat['roi_normalized']
 
-            # 정규화 좌표 → 픽셀 좌표 변환
+            # 정규화 좌표 → 픽셀 좌표 변환 (round()로 정확한 반올림)
             pixel_roi = [
-                [int(point[0] * frame_width), int(point[1] * frame_height)]
+                [round(point[0] * frame_width), round(point[1] * frame_height)]
                 for point in normalized_roi
             ]
 

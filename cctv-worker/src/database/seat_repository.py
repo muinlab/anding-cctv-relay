@@ -54,6 +54,14 @@ class SeatRepository:
             좌석 정보 리스트 [{seat_id, roi_polygon, seat_label}, ...]
             Supabase 및 fallback 모두 실패 시 빈 리스트 반환
         """
+        # 입력값 검증
+        if not isinstance(store_id, str) or not store_id:
+            logger.warning(f"Invalid store_id: {store_id}")
+            return []
+        if not isinstance(channel_id, int) or channel_id < 0:
+            logger.warning(f"Invalid channel_id: {channel_id}")
+            return []
+
         cache_key = f"{store_id}:{channel_id}"
 
         # 1. 캐시 확인
@@ -113,6 +121,22 @@ class SeatRepository:
         Returns:
             모든 좌석 정보 리스트
         """
+        # 입력값 검증
+        if not isinstance(store_id, str) or not store_id:
+            logger.warning(f"Invalid store_id: {store_id}")
+            return []
+
+        cache_key = f"{store_id}:all"
+
+        # 1. 캐시 확인
+        with self._cache_lock:
+            if cache_key in self._cache:
+                entry = self._cache[cache_key]
+                if time.time() - entry['timestamp'] < self._cache_ttl:
+                    logger.debug(f"Cache hit: {cache_key}")
+                    return entry['data']
+
+        # 2. Supabase 조회 시도
         try:
             response = (
                 self.client.client.table('seats')
@@ -121,10 +145,32 @@ class SeatRepository:
                 .eq('is_active', True)
                 .execute()
             )
-            return response.data or []
+            data = response.data or []
+
+            # 캐시 업데이트
+            with self._cache_lock:
+                self._cache[cache_key] = {
+                    'data': data,
+                    'timestamp': time.time()
+                }
+
+            # Fallback JSON도 업데이트
+            if data:
+                self._save_fallback(cache_key, data)
+
+            return data
+
         except Exception as e:
-            logger.error(f"전체 좌석 조회 실패: {e}")
-            return []
+            logger.warning(f"전체 좌석 조회 실패: {e}, fallback 사용")
+
+            # 3. 만료된 캐시라도 있으면 사용
+            with self._cache_lock:
+                if cache_key in self._cache:
+                    logger.info(f"Stale cache 사용: {cache_key}")
+                    return self._cache[cache_key]['data']
+
+            # 4. 로컬 JSON fallback
+            return self._load_fallback(cache_key)
 
     def _save_fallback(self, cache_key: str, data: List[Dict[str, Any]]) -> None:
         """Fallback JSON 저장.
@@ -142,7 +188,7 @@ class SeatRepository:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             logger.debug(f"Fallback 저장: {path}")
         except Exception as e:
-            logger.debug(f"Fallback 저장 실패: {e}")
+            logger.warning(f"Fallback 저장 실패: {e}")
 
     def _load_fallback(self, cache_key: str) -> List[Dict[str, Any]]:
         """Fallback JSON 로드.
@@ -162,7 +208,7 @@ class SeatRepository:
                     logger.info(f"Fallback 로드 성공: {path}")
                     return data
         except Exception as e:
-            logger.debug(f"Fallback 로드 실패: {e}")
+            logger.warning(f"Fallback 로드 실패: {e}")
         return []
 
     def invalidate_cache(
