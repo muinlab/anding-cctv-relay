@@ -53,8 +53,8 @@ COPY pyproject.toml .
 RUN mkdir -p data/roi_configs data/snapshots logs && \
     chmod +x entrypoint.sh
 
-# Download YOLO model (optional, can mount from host)
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" || true
+# Download YOLO model (yolo11n for better CPU performance)
+RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')" || true
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1

@@ -13,6 +13,7 @@ jobs:
       STORE_ID: oryudong
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      DEBUG_STREAM_ENABLED: "true"
 
     steps:
       - name: Checkout
@@ -21,16 +22,26 @@ jobs:
       - name: Generate go2rtc config from Supabase
         run: ./scripts/generate-go2rtc-config.sh
 
-      - name: Restart services
+      - name: Restart go2rtc
         run: |
-          docker compose down
+          docker compose down go2rtc || true
           docker compose up -d go2rtc
 
-      - name: Health check
+      - name: Health check go2rtc
         run: |
           sleep 5
           curl -sf http://localhost:1984/api || exit 1
           echo "go2rtc is healthy"
+
+      - name: Build and start cctv-worker
+        run: |
+          docker compose build cctv-worker
+          docker compose up -d cctv-worker
+
+      - name: Health check cctv-worker
+        run: |
+          sleep 30
+          docker compose ps cctv-worker
 
       - name: Show status
         run: |
@@ -39,3 +50,6 @@ jobs:
           echo ""
           echo "=== Available Streams ==="
           curl -s http://localhost:1984/api/streams | jq 'keys'
+          echo ""
+          echo "=== cctv-worker logs ==="
+          docker compose logs --tail=20 cctv-worker
